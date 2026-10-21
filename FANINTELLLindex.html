@@ -1,0 +1,2097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FanIntel: WSL fan intelligence</title>
+<meta name="description" content="FanIntel turns a WSL club's fan file into risk, engagement and commercial decisions.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<style>
+:root, :root[data-theme="light"], :root[data-theme="dark"]{
+  --bg:#EEE9FA; --ink:#0E1A2E; --muted:#4E5B72; --faint:#8A97AC; --ghost:#B8C7DC;
+  --lime:#5A7A00; --lime-soft:rgba(90,122,0,.12); --blue:#2F6FDB; --blue-soft:rgba(47,111,219,.12);
+  --red:#C93A3A; --red-soft:rgba(201,58,58,.10); --amber:#B7791F; --amber-soft:rgba(183,121,31,.13);
+  --purple:#7A5AF8; --grey:#7B8698; --grey-soft:rgba(123,134,152,.14);
+  --panel:rgba(255,255,255,.72); --panel-solid:#FBF9FF; --line:rgba(14,26,46,.09); --shadow:rgba(70,40,130,.22);
+  color-scheme:light;
+}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html{min-height:100%;background:#E5DDF7;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{min-height:100%;margin:0;color:var(--ink);font-family:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;
+  background:radial-gradient(ellipse 70% 50% at 50% -5%,rgba(255,255,255,.8),transparent 70%),linear-gradient(180deg,#F4F0FC 0%,#E5DDF7 100%) fixed,var(--bg)}
+canvas#field{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+[hidden]{display:none !important}
+
+/* header */
+.hud{position:relative;z-index:3;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:clamp(14px,3vw,28px) clamp(16px,4vw,48px)}
+.logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.15rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
+.logo svg{width:16px;height:22px}
+.steps{display:flex;gap:6px;align-items:center;font-size:.85rem;color:var(--faint)}
+.steps span{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px}
+.steps span i{font-style:normal;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:.72rem;font-weight:800;background:var(--line)}
+.steps span.on{color:var(--ink);background:var(--panel)}
+.steps span.on i{background:var(--ink);color:#fff}
+.steps span.done i{background:var(--lime);color:#fff}
+@media (max-width:640px){.steps span b{display:none}.steps span{padding:6px 4px}}
+
+.wrap{position:relative;z-index:2;max-width:1220px;margin:0 auto;padding:clamp(8px,3vh,32px) clamp(16px,4vw,48px) 72px;perspective:1400px}
+h1{font-size:clamp(2.2rem,5vw,3.9rem);font-weight:850;font-stretch:118%;letter-spacing:-.035em;line-height:.98;margin:0 0 14px}
+.lede{font-size:clamp(1rem,1.5vw,1.15rem);line-height:1.55;color:var(--muted);margin:0 0 26px;max-width:46ch}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:22px;
+  -webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2);
+  box-shadow:0 50px 90px -40px var(--shadow),0 1px 0 rgba(255,255,255,.8) inset;transform-style:preserve-3d;transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+.tilt{transform:rotateY(var(--ry,0deg)) rotateX(var(--rx,0deg))}
+.btn{font:inherit;font-weight:700;font-size:.95rem;border-radius:999px;padding:12px 22px;cursor:pointer;border:1.5px solid var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:background .2s,color .2s,border-color .2s,opacity .2s}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-primary:hover{background:var(--lime);border-color:var(--lime)}
+.btn-ghost{background:transparent;color:var(--ink)}
+.btn-ghost:hover{background:rgba(255,255,255,.6)}
+.btn-sm{padding:8px 16px;font-size:.85rem}
+.btn[disabled]{opacity:.35;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--lime);outline-offset:3px;border-radius:8px}
+
+/* ---------- upload view ---------- */
+.upgrid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:clamp(20px,3vw,40px);align-items:start}
+@media (max-width:900px){.upgrid{grid-template-columns:minmax(0,1fr)}}
+.drop{position:relative;padding:clamp(26px,4vw,44px);text-align:center;cursor:pointer;outline:none}
+.drop .inner{border:1.5px dashed rgba(14,26,46,.18);border-radius:16px;padding:clamp(28px,5vw,52px) 20px;transition:border-color .25s,background .25s}
+.drop:hover .inner,.drop.over .inner{border-color:var(--lime);background:var(--lime-soft)}
+.drop:focus-visible .inner{border-color:var(--lime)}
+.icon{width:58px;height:58px;margin:0 auto 16px;border-radius:16px;display:grid;place-items:center;background:var(--ink);color:#fff;box-shadow:0 14px 30px -12px rgba(14,26,46,.6);transform:translateZ(30px)}
+.icon svg{width:26px;height:26px}
+.drop h2{margin:0 0 6px;font-size:1.25rem;font-weight:750}
+.drop p{margin:0;color:var(--muted);font-size:.95rem}
+.drop small{display:block;margin-top:14px;color:var(--faint);font-size:.8rem}
+.drop input{display:none}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.privacy{display:flex;gap:8px;align-items:center;margin-top:18px;font-size:.82rem;color:var(--muted)}
+.privacy svg{width:15px;height:15px;flex:none}
+.summary{display:none;padding:22px}
+.summary.on{display:block;animation:rise .6s cubic-bezier(.2,.8,.2,1)}
+@keyframes rise{from{opacity:0;transform:translateY(14px) rotateX(10deg)}to{opacity:1;transform:none}}
+.file{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.file .badge{width:44px;height:44px;flex:none;border-radius:12px;background:var(--lime-soft);color:var(--lime);display:grid;place-items:center;font-weight:800;font-size:.75rem}
+.file b{display:block;font-size:1rem;word-break:break-all}
+.file span{font-size:.82rem;color:var(--muted)}
+.file button{margin-left:auto}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+.stat{background:var(--panel-solid);border:1px solid var(--line);border-radius:14px;padding:14px}
+.stat b{display:block;font-size:clamp(1.5rem,3vw,2.1rem);font-weight:850;font-stretch:115%;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.stat span{font-size:.78rem;color:var(--muted)}
+.preview{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel-solid)}
+table{border-collapse:collapse;font-size:.8rem;width:100%;white-space:nowrap}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+th{font-weight:700;color:var(--muted);background:var(--panel-solid)}
+th.hit{color:var(--lime)}
+tr:last-child td{border-bottom:0}
+.go{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px}
+.go p{margin:0;font-size:.85rem;color:var(--muted)}
+.msg{display:none;margin-top:14px;padding:12px 14px;border-radius:12px;font-size:.88rem;line-height:1.5;background:var(--red-soft);color:var(--red)}
+.msg.on{display:block}
+aside.cols{padding:22px 22px 10px}
+aside.cols h3{margin:0 0 4px;font-size:1.05rem;font-weight:750}
+aside.cols .sub{margin:0 0 12px;font-size:.85rem;color:var(--muted)}
+.col{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line)}
+.col .dot{flex:none;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--ghost);display:grid;place-items:center;margin-top:1px;transition:all .35s}
+.col .dot svg{width:11px;height:11px;opacity:0;transition:opacity .3s}
+.col.hit .dot{background:var(--lime);border-color:var(--lime)}
+.col.hit .dot svg{opacity:1}
+.col.miss .dot{border-style:dashed}
+.col b{display:block;font-size:.92rem}
+.col b em{font-style:normal;font-size:.7rem;font-weight:700;color:var(--blue);margin-left:6px}
+.col span{font-size:.8rem;color:var(--muted)}
+.col .as{display:block;margin-top:2px;font-size:.74rem;color:var(--lime);font-weight:650}
+.copyrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0;border-top:1px solid var(--line);font-size:.82rem;color:var(--muted)}
+.copyrow button{font:inherit;font-size:.82rem;font-weight:700;background:none;border:0;color:var(--ink);cursor:pointer;padding:4px 0;text-decoration:underline;text-underline-offset:3px}
+
+/* ---------- analysing overlay ---------- */
+.analysing{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(238,233,250,.7);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.analysing .panel{padding:28px 32px;min-width:min(380px,88vw)}
+.analysing h3{margin:0 0 14px;font-size:1.1rem}
+.analysing li{list-style:none;display:flex;gap:10px;align-items:center;padding:6px 0;color:var(--faint);font-size:.95rem;transition:color .3s}
+.analysing li.on{color:var(--ink)}
+.analysing li i{width:18px;height:18px;border-radius:50%;border:2px solid var(--ghost);flex:none;transition:all .3s}
+.analysing li.on i{background:var(--lime);border-color:var(--lime)}
+.analysing ul{margin:0;padding:0}
+
+/* ---------- results view ---------- */
+.rhead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.rhead .meta{font-size:.82rem;color:var(--muted);line-height:1.6}
+.rhead .meta b{color:var(--ink)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:5px;border-radius:999px;background:var(--panel);border:1px solid var(--line);margin-bottom:26px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{font:inherit;font-size:.9rem;font-weight:650;white-space:nowrap;border:0;background:none;color:var(--muted);padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.tab.on{background:var(--ink);color:#fff}
+.tab[disabled]{cursor:default;opacity:.55}
+.tab small{font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--line)}
+
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:clamp(18px,3vw,36px);align-items:stretch;margin-bottom:22px}
+@media (max-width:960px){.hero{grid-template-columns:minmax(0,1fr)}}
+.kicker{font-size:.85rem;font-weight:700;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.kicker i{width:8px;height:8px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 4px var(--lime-soft)}
+.headline{font-size:clamp(1.6rem,3vw,2.35rem);font-weight:800;letter-spacing:-.02em;line-height:1.18;margin:0 0 22px}
+.headline em{font-style:normal;color:var(--lime)}
+.fcrs{padding:20px 22px}
+.fcrs .top{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.fcrs .big{font-size:clamp(3.2rem,6vw,4.6rem);font-weight:850;font-stretch:120%;letter-spacing:-.04em;line-height:.9;font-variant-numeric:tabular-nums}
+.fcrs .lbl{font-size:.82rem;font-weight:650;color:var(--muted);margin-bottom:10px}
+.fcrs .note{font-size:.8rem;color:var(--muted);margin-top:14px;line-height:1.5}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-weight:750;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.pill.green{background:var(--lime-soft);color:var(--lime)}
+.pill.blue{background:var(--blue-soft);color:var(--blue)}
+.pill.grey{background:var(--grey-soft);color:#5C6779}
+.pill.amber{background:var(--amber-soft);color:var(--amber)}
+.pill.red{background:var(--red-soft);color:var(--red)}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.bandbar{display:flex;height:12px;border-radius:999px;overflow:hidden;margin:18px 0 12px;background:var(--line)}
+.bandbar span{height:100%;transform-origin:left;animation:grow 1.1s cubic-bezier(.2,.8,.2,1) both}
+@keyframes grow{from{transform:scaleX(0)}}
+.legend{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.legend div b{display:block;font-size:1.35rem;font-weight:800;font-variant-numeric:tabular-nums}
+.legend div span{font-size:.78rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:3px;flex:none}
+
+.viz{position:relative;min-height:340px;overflow:hidden;padding:0}
+.viz canvas{position:absolute;inset:0;width:100%;height:100%}
+.viz .cap{position:absolute;left:18px;right:18px;bottom:14px;display:flex;justify-content:space-between;gap:10px;font-size:.78rem;color:var(--muted);pointer-events:none}
+.viz .title{position:absolute;left:18px;top:16px;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:8px}
+.viz .title i{width:8px;height:8px;border-radius:50%;background:var(--lime)}
+
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:22px}
+@media (max-width:1060px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.cards{grid-template-columns:1fr}}
+.card{padding:20px;display:flex;flex-direction:column;min-height:228px;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--acc)}
+.card .lab{font-size:.8rem;font-weight:650;color:var(--muted)}
+.card .name{font-size:1.1rem;font-weight:800;color:var(--acc);margin-top:8px}
+.card .hero-n{font-size:clamp(1.7rem,2.6vw,2.2rem);font-weight:850;font-stretch:112%;letter-spacing:-.03em;margin-top:auto;padding-top:16px;font-variant-numeric:tabular-nums}
+.card .foot{font-size:.78rem;color:var(--muted);margin-top:10px;line-height:1.45}
+.card .pills{margin-top:10px;margin-bottom:0}
+
+.sec{padding:22px;margin-bottom:22px}
+.sec h3{margin:0 0 4px;font-size:1.1rem;font-weight:800}
+.sec .sub{margin:0 0 16px;font-size:.85rem;color:var(--muted)}
+.opps{overflow-x:auto}
+.opps table{font-size:.88rem}
+.opps th{background:transparent;font-size:.78rem}
+.opps td{padding:14px 12px;vertical-align:middle}
+.opps td.act{font-weight:650;white-space:normal;min-width:220px}
+.rev{display:flex;align-items:center;gap:10px;min-width:170px}
+.rev b{font-variant-numeric:tabular-nums;color:var(--lime);min-width:84px}
+.rev span{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.rev span i{display:block;height:100%;background:var(--lime);border-radius:4px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+
+.reco{background:linear-gradient(135deg,#0E1A2E 0%,#16253F 100%);color:#EEF2F8;border-radius:22px;padding:clamp(22px,3vw,34px);position:relative;overflow:hidden;box-shadow:0 50px 90px -40px rgba(14,26,46,.6)}
+.reco::after{content:"";position:absolute;right:-80px;top:-80px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(212,245,60,.18),transparent 70%)}
+.reco .k{font-size:.82rem;font-weight:700;color:#D4F53C;margin-bottom:12px}
+.reco h4{margin:0;font-size:clamp(1.35rem,2.6vw,1.9rem);font-weight:800;line-height:1.25;max-width:30ch}
+.reco .row{display:flex;align-items:center;gap:16px;margin:18px 0 12px;flex-wrap:wrap}
+.reco .up{font-size:clamp(1.8rem,3vw,2.4rem);font-weight:850;color:#D4F53C;font-variant-numeric:tabular-nums}
+.reco .up small{font-size:.85rem;font-weight:600;color:#9AA6BA;margin-left:6px}
+.reco p{margin:0;font-size:.92rem;line-height:1.6;color:#AEB8C9;max-width:62ch}
+.reco .pill{background:rgba(212,245,60,.14);color:#D4F53C}
+.disclaim{margin-top:18px;font-size:.78rem;color:var(--faint);line-height:1.5}
+.toofew{padding:26px}
+
+
+
+/* audience story */
+.story{max-width:900px;margin:0 auto}
+.story .intro{margin-bottom:26px}
+.chapter{display:grid;grid-template-columns:110px minmax(0,1fr);gap:24px;padding:30px 0;border-top:1px solid var(--line);opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1)}
+.chapter.in{opacity:1;transform:none}
+.chapter .no{font-size:3.4rem;font-weight:850;font-stretch:120%;letter-spacing:-.04em;line-height:.9;color:transparent;-webkit-text-stroke:1.5px var(--ink);opacity:.25}
+.chapter h3{margin:0 0 12px;font-size:1.35rem;font-weight:800;letter-spacing:-.01em}
+.chapter p{margin:0;font-size:1.08rem;line-height:1.75;color:#2B3850}
+.chapter p b{color:var(--lime);font-weight:800}
+@media (max-width:640px){.chapter{grid-template-columns:minmax(0,1fr);gap:6px}.chapter .no{font-size:2.4rem}}
+.recs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:8px}
+@media (max-width:960px){.recs{grid-template-columns:minmax(0,1fr)}}
+.rec{padding:22px;display:flex;flex-direction:column}
+.rec .i{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--ink);color:#D4F53C;font-weight:850;margin-bottom:14px}
+.rec h4{margin:0 0 10px;font-size:1.05rem;font-weight:800;line-height:1.3}
+.rec p{margin:0 0 14px;font-size:.88rem;line-height:1.6;color:#3B475C}
+.rec .imp{margin-top:auto;font-weight:800;color:var(--lime);font-size:.95rem;line-height:1.4}
+.rec .pills{margin-top:12px}
+/* sponsorship */
+.sgrid{display:grid;grid-template-columns:minmax(0,1.1fr) repeat(3,minmax(0,1fr));gap:14px;margin-bottom:22px}
+@media (max-width:1060px){.sgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.sgrid{grid-template-columns:minmax(0,1fr)}}
+.gauge{padding:18px 20px;display:flex;align-items:center;gap:16px}
+.gauge svg{width:118px;height:118px;flex:none}
+.gauge b{display:block;font-size:.82rem;font-weight:700}
+.gauge span{font-size:.76rem;color:var(--muted)}
+.donutwrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.donutwrap svg{width:190px;height:190px;flex:none}
+.cats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:960px){.cats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.cats{grid-template-columns:minmax(0,1fr)}}
+.cat{padding:18px;border-radius:16px;background:var(--panel-solid);border:1px solid var(--line)}
+.cat .t{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.cat .t b{font-size:1rem}
+.cat .br{font-size:.8rem;color:var(--muted);margin-bottom:8px}
+.cat p{margin:0;font-size:.86rem;line-height:1.55;color:#3B475C}
+
+/* campaign intelligence */
+.chead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.chead h2{margin:0 0 6px;font-size:clamp(1.5rem,2.6vw,2rem);font-weight:850;letter-spacing:-.02em}
+.chead p{margin:0;color:var(--muted);font-size:.95rem;max-width:56ch}
+.bubble{padding:20px 22px 12px;margin-bottom:22px}
+.bubble svg{display:block;width:100%;height:auto}
+.bubble .axl{font-size:10px;fill:#8A97AC}
+.bubble .lab{font-size:11px;font-weight:700}
+.briefs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-bottom:26px}
+@media (max-width:980px){.briefs{grid-template-columns:minmax(0,1fr)}}
+.brief{padding:22px;position:relative;overflow:hidden}
+.brief::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--acc)}
+.brief .top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.brief .nm{font-size:1.3rem;font-weight:850;color:var(--acc)}
+.brief .sz{font-size:.84rem;color:var(--muted);margin-top:2px}
+.brief .cv{text-align:right}
+.brief .cv b{display:block;font-size:1.5rem;font-weight:850;font-variant-numeric:tabular-nums}
+.brief .cv span{font-size:.74rem;color:var(--muted)}
+.brief .mets{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end;margin:16px 0 14px}
+.brief .mets div span{display:block;font-size:.74rem;color:var(--muted);font-weight:650;margin-bottom:4px}
+.brief .mets div b{font-size:1.65rem;font-weight:850;font-stretch:110%;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.note2{border-radius:12px;padding:10px 13px;font-size:.84rem;line-height:1.5;color:#3B475C;background:var(--panel-solid);border-left:3px solid var(--c);margin-top:8px}
+.note2 b{color:var(--c)}
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+@media (max-width:560px){.fields{grid-template-columns:minmax(0,1fr)}}
+.fields span{display:block;font-size:.72rem;color:var(--muted);font-weight:700;margin-bottom:4px}
+.fields p{margin:0;font-size:.86rem;line-height:1.5}
+.fields p.ch{color:var(--blue);font-weight:650}
+.gen{padding:24px}
+.gen .segpick{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 18px}
+.gen .segpick button{font:inherit;font-size:.85rem;font-weight:700;padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);background:var(--panel-solid);color:var(--ink);cursor:pointer}
+.gen .segpick button.on{border-color:var(--c);background:var(--c);color:#fff}
+.gen .form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px}
+@media (max-width:700px){.gen .form{grid-template-columns:minmax(0,1fr)}}
+.gen label{display:block;font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px}
+.gen textarea,.gen input{width:100%;font:inherit;font-size:.9rem;line-height:1.45;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;resize:vertical}
+.gen textarea:focus,.gen input:focus{outline:2px solid var(--lime);outline-offset:1px}
+.gen .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center}
+.gen .row small{color:var(--muted);font-size:.8rem}
+
+/* fan dashboard */
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:22px}
+@media (max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{padding:16px 16px 14px}
+.kpi b{display:block;font-size:clamp(1.6rem,2.4vw,2.1rem);font-weight:850;font-stretch:112%;letter-spacing:-.03em;line-height:1.05;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:.8rem;font-weight:650;color:var(--muted);margin-top:6px}
+.kpi .s{font-size:.74rem;color:var(--faint);margin-top:3px}
+.kpi .pill{margin-top:8px}
+.grid2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:18px;margin-bottom:22px}
+.grid2.even{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:960px){.grid2,.grid2.even{grid-template-columns:minmax(0,1fr)}}
+.grid2 > .sec{margin-bottom:0}
+.segviz{position:relative;min-height:360px;padding:0;overflow:hidden}
+.segviz canvas{position:absolute;inset:0;width:100%;height:100%}
+.segviz .title{position:absolute;left:18px;top:16px;font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:8px;z-index:2}
+.segviz .title i{width:8px;height:8px;border-radius:50%;background:var(--lime)}
+.seglabel{position:absolute;transform:translate(-50%,0);text-align:center;font-size:.76rem;font-weight:700;white-space:nowrap;pointer-events:none;z-index:2}
+.seglabel span{display:block;font-size:.72rem;font-weight:600;color:var(--muted)}
+.seglist{display:flex;flex-direction:column;gap:2px}
+.segrow{display:grid;grid-template-columns:14px 1fr auto auto;gap:12px;align-items:center;padding:11px 0;border-top:1px solid var(--line);font-size:.9rem}
+.segrow:first-child{border-top:0}
+.segrow i{width:12px;height:12px;border-radius:4px}
+.segrow b{font-variant-numeric:tabular-nums}
+.segrow span.p{font-size:.8rem;color:var(--muted);min-width:42px;text-align:right}
+.alert{margin-top:14px;border-radius:16px;padding:16px 18px;background:var(--red-soft);border:1px solid rgba(201,58,58,.18)}
+.alert b{display:block;color:var(--red);font-size:.9rem;margin-bottom:6px}
+.alert p{margin:0;font-size:.86rem;line-height:1.55;color:#4A3A3A}
+.alert p.rec{margin-top:8px;color:var(--lime);font-weight:650}
+.vbars{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:14px;align-items:end;height:200px;padding-top:24px}
+.vbar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:8px}
+.vbar .c{font-weight:800;font-size:.95rem;font-variant-numeric:tabular-nums}
+.vbar .b{width:100%;max-width:74px;border-radius:10px 10px 4px 4px;transform-origin:bottom;animation:growY 1s cubic-bezier(.2,.8,.2,1) both}
+.vbar .n{font-size:.78rem;color:var(--muted);font-weight:650}
+@keyframes growY{from{transform:scaleY(0)}}
+details.drv{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+details.drv summary{cursor:pointer;font-size:.86rem;font-weight:700;list-style:none;display:flex;align-items:center;gap:8px}
+details.drv summary::-webkit-details-marker{display:none}
+details.drv summary::before{content:"+";display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--line);font-weight:800}
+details.drv[open] summary::before{content:"\2212"}
+.drvlist{margin:12px 0 4px;padding:0;list-style:none;font-size:.86rem;line-height:1.5}
+.drvlist li{display:flex;gap:8px;padding:3px 0}
+.drvlist li.up::before{content:"\25B2";color:var(--lime);font-size:.7rem;margin-top:3px}
+.drvlist li.dn::before{content:"\25BC";color:var(--red);font-size:.7rem;margin-top:3px}
+.tbl{overflow-x:auto}
+.tbl table{font-size:.86rem}
+.tbl th{background:transparent;font-size:.76rem}
+.tbl td{padding:11px 12px}
+.tbl td.num{font-variant-numeric:tabular-nums}
+.hbars .r{display:grid;grid-template-columns:minmax(120px,190px) 1fr auto;gap:12px;align-items:center;padding:8px 0;font-size:.86rem}
+.hbars .r .t{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
+.hbars .r .t i{display:block;height:100%;border-radius:6px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+.hbars .r b{font-variant-numeric:tabular-nums;min-width:48px;text-align:right}
+.funnel .r{display:grid;grid-template-columns:96px 1fr 92px;gap:12px;align-items:center;padding:6px 0;font-size:.86rem}
+.funnel .r .t{display:flex;justify-content:center}
+.funnel .r .t i{display:block;height:30px;border-radius:8px;transform-origin:center;animation:growX 1s cubic-bezier(.2,.8,.2,1) both}
+.funnel .r b{font-variant-numeric:tabular-nums;text-align:right}
+.funnel .r b small{color:var(--muted);font-weight:600;margin-left:6px}
+@keyframes growX{from{transform:scaleX(0)}}
+@keyframes dash{to{stroke-dashoffset:0}}
+.dists{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}
+@media (max-width:1000px){.dists{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.dists{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.dist{padding:14px}
+.dist .h{font-size:.82rem;font-weight:700;margin-bottom:8px}
+.dist svg{display:block;width:100%;height:84px}
+.dist .ax{display:flex;justify-content:space-between;font-size:.68rem;color:var(--faint);margin-top:4px}
+.ltvsvg{display:block;width:100%;height:200px}
+.cap2{font-size:.78rem;color:var(--muted);margin-top:10px;line-height:1.5}
+@media (prefers-reduced-motion: reduce){.panel,.summary.on,.bandbar span,.rev span i,.vbar .b,.hbars i,.funnel i{transition:none;animation:none}}
+#landing .stage{position:relative;height:100%;overflow:hidden;perspective:1200px;background:radial-gradient(ellipse 70% 50% at 50% -5%,var(--glow),transparent 70%),linear-gradient(180deg,#F4F0FC 0%,#E5DDF7 100%)}
+#landing canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#landing .hud{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;justify-content:space-between;align-items:center;padding:clamp(14px,3vw,28px) clamp(16px,4vw,40px)}
+#landing .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.15rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
+#landing .logo svg{width:16px;height:22px}
+#landing .ghost-btn{font:inherit;font-size:.9rem;color:var(--muted);background:none;border:0;padding:8px 4px;cursor:pointer}
+#landing .ghost-btn:hover{color:var(--ink)}
+#landing .copy{position:absolute;z-index:3;left:0;right:0;top:clamp(84px,14vh,150px);text-align:center;padding:0 20px;pointer-events:none;opacity:0;transition:opacity .5s}
+#landing .copy.on{opacity:1}
+#landing .line{display:block;overflow:hidden;padding-bottom:.08em}
+#landing .line > span{display:inline-block;transform:translateY(105%);transition:transform .6s cubic-bezier(.2,.8,.2,1)}
+#landing .line.in > span{transform:none}
+#landing #L_lead{font-size:clamp(1.05rem,2.4vw,1.5rem);font-weight:450;color:var(--muted);margin:0 auto;max-width:34ch}
+#landing .num-wrap{position:relative;display:inline-block;margin-top:.15em}
+#landing #L_num{font-size:clamp(4rem,15vw,10.5rem);font-weight:850;font-stretch:125%;letter-spacing:-.04em;line-height:.95;font-variant-numeric:tabular-nums}
+#landing .ring{position:absolute;left:-8%;top:-4%;width:116%;height:112%;overflow:visible;pointer-events:none;opacity:0}
+#landing .ring.on{opacity:1}
+#landing .ring path{fill:none;stroke:var(--loss);stroke-width:3;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 1s cubic-bezier(.5,0,.2,1)}
+#landing .ring.on path{stroke-dashoffset:0}
+#landing #L_tag{margin:.5em 0 0;font-size:clamp(.95rem,2vw,1.2rem);font-weight:650;min-height:1.4em}
+#landing #L_tag.loss{color:var(--loss)}
+#landing #L_tag.win{color:var(--lime)}
+#landing .panel{
+  position:absolute;z-index:4;border-radius:18px;padding:18px 20px;
+  background:var(--panel);border:1px solid var(--panel-line);
+  -webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2);
+  box-shadow:0 50px 90px -30px var(--shadow),0 1px 0 rgba(255,255,255,.06) inset;
+  transform-style:preserve-3d;will-change:transform,opacity;pointer-events:none;
+}
+#landing .panel h3{margin:0 0 12px;font-size:.82rem;font-weight:650;color:var(--muted);display:flex;align-items:center;gap:8px}
+#landing .panel h3 i{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 4px color-mix(in srgb,var(--lime) 22%,transparent)}
+#landing #L_crm{left:50%;top:50%;width:min(460px,88vw);margin-left:calc(min(460px,88vw) / -2);margin-top:-150px;
+  opacity:0;transform:translateZ(-300px) rotateX(38deg);transition:transform 1.1s cubic-bezier(.2,.8,.2,1),opacity .6s}
+#landing #L_crm.on{opacity:1;transform:translateZ(0) rotateX(14deg) rotateY(var(--ry,0deg))}
+#landing #L_crm.out{opacity:0;transform:translateZ(-700px) rotateX(70deg);transition:transform .9s cubic-bezier(.6,0,.8,.4),opacity .7s .15s}
+#landing #L_crm .big{font-size:clamp(3rem,10vw,4.6rem);font-weight:850;font-stretch:125%;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+#landing #L_crm .lbl{font-size:.85rem;color:var(--muted);margin-top:4px}
+#landing #L_crm svg{display:block;width:100%;height:46px;margin:14px 0 12px}
+#landing #L_crm svg path.l{fill:none;stroke:var(--lime);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+#landing #L_crm svg path.f{fill:var(--lime);opacity:.12}
+#landing .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+#landing .tile{border:1px solid var(--panel-line);border-radius:10px;padding:9px 10px}
+#landing .tile b{display:block;font-size:1.05rem;font-weight:750}
+#landing .tile span{font-size:.72rem;color:var(--muted)}
+#landing .side{width:250px;top:56%;opacity:0;transition:transform 1.1s cubic-bezier(.2,.8,.2,1),opacity .7s}
+#landing #L_weights{left:clamp(24px,5vw,80px);transform:translateY(-50%) translateZ(-260px) rotateY(40deg)}
+#landing #L_signals{right:clamp(24px,5vw,80px);transform:translateY(-50%) translateZ(-260px) rotateY(-40deg)}
+#landing #L_weights.on{opacity:1;transform:translateY(-50%) rotateY(calc(18deg + var(--ry,0deg))) rotateX(var(--rx,0deg))}
+#landing #L_signals.on{opacity:1;transform:translateY(-50%) rotateY(calc(-18deg + var(--ry,0deg))) rotateX(var(--rx,0deg))}
+#landing .bar{margin:0 0 11px}
+#landing .bar:last-child{margin-bottom:0}
+#landing .bar .row{display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:5px}
+#landing .bar .row b{font-weight:750;font-variant-numeric:tabular-nums}
+#landing .bar .track{height:7px;border-radius:4px;background:var(--panel-line);overflow:hidden}
+#landing .bar .fill{height:100%;border-radius:4px;background:var(--lime);transform-origin:left;transform:scaleX(0);transition:transform 1s cubic-bezier(.2,.8,.2,1)}
+#landing #L_weights.on .fill{transform:scaleX(var(--w))}
+#landing .sig{display:flex;gap:10px;align-items:flex-start;font-size:.84rem;line-height:1.4;padding:9px 0;border-top:1px solid var(--panel-line)}
+#landing .sig:first-of-type{border-top:0;padding-top:0}
+#landing .sig em{font-style:normal;flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:.72rem;font-weight:800;background:color-mix(in srgb,var(--lime) 18%,transparent);color:var(--lime)}
+@media (max-width:1060px),(max-height:680px){#landing .side{display:none}}
+#landing .cta{position:absolute;z-index:5;left:0;right:0;bottom:0;padding:0 20px clamp(22px,5vh,48px);text-align:center;opacity:0;transform:translateY(16px);transition:opacity .7s ease,transform .7s ease;pointer-events:none}
+#landing .cta.on{opacity:1;transform:none;pointer-events:auto}
+#landing .cta p{margin:0 auto 18px;max-width:46ch;font-size:clamp(.95rem,1.8vw,1.1rem);line-height:1.5;color:var(--muted)}
+#landing .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+#landing .btn{font:inherit;font-weight:700;font-size:1rem;border-radius:999px;padding:14px 26px;text-decoration:none;cursor:pointer;border:1.5px solid var(--ink)}
+#landing .btn-primary{background:var(--ink);color:var(--bg)}
+#landing .btn-primary:hover{background:var(--lime);border-color:var(--lime);color:#fff}
+#landing .btn-secondary{background:transparent;color:var(--ink)}
+#landing .btn-secondary:hover{border-color:var(--lime);color:var(--lime)}
+#landing .credit{margin-top:18px;font-size:.8rem;color:var(--muted)}
+#landing .credit a{color:inherit}
+#landing .note{display:block;margin-top:6px;font-size:.78rem;color:var(--muted)}
+#landing .progress{position:absolute;left:0;right:0;bottom:0;height:2px;z-index:6}
+#landing .progress span{display:block;height:100%;width:0;background:var(--lime);opacity:.8}
+#landing :focus-visible{outline:2px solid var(--lime);outline-offset:3px;border-radius:6px}
+@media (prefers-reduced-motion: reduce){#landing .line > span,#landing .cta,#landing .ring path,#landing .panel,#landing .copy,#landing .fill{transition:none}}
+
+
+#landing{position:fixed;inset:0;z-index:40;background:var(--bg);transition:opacity .5s ease}
+#landing.leaving{opacity:0;pointer-events:none}
+body.intro{overflow:hidden}
+#landing .cta-row .btn{font-size:1rem}
+#landing #L_results{position:relative;overflow:hidden}
+#landing #L_results::after{content:"";position:absolute;left:0;bottom:0;height:3px;width:100%;background:#D4F53C;transform:scaleX(0);transform-origin:left}
+#landing #L_results.auto::after{animation:fillbar 5s linear forwards}
+#landing .count{margin:12px 0 0;min-height:1.3em;font-size:.88rem;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+@keyframes fillbar{to{transform:scaleX(1)}}
+#landing .linkbtn{font:inherit;font-size:.85rem;background:none;border:0;color:var(--muted);text-decoration:underline;text-underline-offset:3px;cursor:pointer;margin-top:12px}
+
+
+:root{--brand:#6D28D9;--brand-soft:rgba(109,40,217,.12)}
+#landing{--lime:#6D28D9}
+#landing #L_results::after{background:#C4B5FD}
+.btn-primary:hover{background:var(--brand);border-color:var(--brand)}
+.drop:hover .inner,.drop.over .inner{border-color:var(--brand);background:var(--brand-soft)}
+.icon{background:var(--brand)}
+.kicker i{background:var(--brand);box-shadow:0 0 0 4px var(--brand-soft)}
+.headline em{color:var(--brand)}
+:focus-visible{outline-color:var(--brand)}
+.logo .mark{width:22px;height:22px}
+.pill.violet{background:var(--brand-soft);color:var(--brand)}
+.src{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:750;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.src::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.src.blue{background:var(--blue-soft);color:var(--blue)}
+.src.violet{background:var(--brand-soft);color:var(--brand)}
+.src.amber{background:var(--amber-soft);color:var(--amber)}
+.shead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.shead h3{margin:0;font-size:1.1rem;font-weight:800}
+.sec .sub{margin:4px 0 16px}
+.gate{border:1.5px dashed rgba(14,26,46,.16);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:.88rem}
+.gate b{color:var(--ink)}
+.gate code{font-family:inherit;font-weight:750;color:var(--brand)}
+.kpis.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:900px){.kpis.four{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis.three{grid-template-columns:minmax(0,1fr)}}
+.comps{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.comp .row{display:flex;justify-content:space-between;font-size:.84rem;margin-bottom:5px}
+.comp .row b{font-variant-numeric:tabular-nums}
+.comp .row small{font-weight:600;color:var(--muted)}
+.comp .track,.cohort .track,.fx .track,.mini{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
+.comp .track i{display:block;height:100%;background:var(--brand);border-radius:4px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+.cohort .track i,.fx .track i{display:block;height:100%;border-radius:4px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+.mini{display:inline-block;width:56px;height:6px;margin-right:8px;vertical-align:middle}
+.mini i{display:block;height:100%;background:var(--brand);border-radius:4px}
+.viz .vlegend{position:absolute;left:18px;right:18px;bottom:14px}
+.vlegend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.78rem;color:var(--muted)}
+.vlegend span{display:flex;align-items:center;gap:6px}
+.vlegend i{width:9px;height:9px;border-radius:3px}
+.vlegend.static{margin-top:12px}
+.cascade{display:grid;grid-template-columns:1fr 18px 1fr 18px 1fr 18px 1.25fr;align-items:stretch;gap:8px}
+.cascade .node{border-radius:16px;padding:14px;background:var(--panel-solid);border:1px solid var(--line);border-top:3px solid var(--c);display:flex;flex-direction:column;gap:4px}
+.cascade .node span{font-size:.76rem;font-weight:700;color:var(--muted)}
+.cascade .node b{font-size:1.6rem;font-weight:850;color:var(--c);font-variant-numeric:tabular-nums}
+.cascade .node b.t{font-size:.98rem;line-height:1.35;color:#fff}
+.cascade .node small{font-size:.76rem;color:var(--muted);line-height:1.4;flex:1}
+.cascade .node .src{align-self:flex-start}
+.cascade .node.act{background:linear-gradient(135deg,#0E1A2E,#2A1660);border:0;color:#fff}
+.cascade .node.act span{color:#C4B5FD}
+.cascade .node.act small{color:#AEB8C9}
+.cascade .arrow{align-self:center;height:2px;background:var(--ghost);position:relative}
+.cascade .arrow::after{content:"";position:absolute;right:-2px;top:-4px;border:5px solid transparent;border-left-color:var(--ghost)}
+@media (max-width:980px){.cascade{grid-template-columns:minmax(0,1fr)}.cascade .arrow{width:2px;height:14px;justify-self:center}.cascade .arrow::after{right:-4px;top:auto;bottom:-8px;border-left-color:transparent;border-top-color:var(--ghost)}}
+.signals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:900px){.signals{grid-template-columns:minmax(0,1fr)}}
+.signal{border-radius:16px;padding:16px;background:var(--panel-solid);border:1px solid var(--line);border-left:4px solid var(--c)}
+.signal .st{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.signal h4{margin:0 0 6px;font-size:1.02rem;font-weight:800}
+.signal p{margin:0 0 10px;font-size:.86rem;line-height:1.55;color:#3B475C}
+.signal .do{font-size:.84rem;font-weight:700;color:var(--brand)}
+.signal .do::before{content:"Next step: ";color:var(--muted);font-weight:650}
+.cohorts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;align-items:start}
+.cohort{padding:16px;position:relative;overflow:hidden}
+.cohort::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--acc)}
+.cohort .nm{font-weight:800;font-size:.98rem}
+.cohort .rs{font-size:2rem;font-weight:850;font-variant-numeric:tabular-nums;margin:6px 0 6px}
+.cohort .rs small{font-size:.75rem;font-weight:650;color:var(--muted);margin-left:6px}
+.cohort .meta{font-size:.8rem;color:var(--muted);margin:10px 0;line-height:1.5}
+.cohort .rec{display:flex;flex-direction:column;gap:1px;font-size:.8rem;line-height:1.45;border-top:1px solid var(--line);padding-top:10px}
+.cohort .rec span{color:var(--muted);font-weight:700;font-size:.7rem;margin-top:7px}
+.cohort .rec span:first-child{margin-top:0}
+.cohort .rec em{font-style:normal;color:var(--brand);font-weight:650}
+.churn .cr{display:grid;grid-template-columns:minmax(110px,150px) 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.churn .cr:first-child{border-top:0}
+.churn .cr .nm{font-weight:700;font-size:.88rem}
+.churn .cr .t{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
+.churn .cr .t i{display:block;height:100%;border-radius:6px;transform-origin:left;animation:grow 1s cubic-bezier(.2,.8,.2,1) both}
+.churn .cr b{font-variant-numeric:tabular-nums;min-width:48px;text-align:right}
+.churn .cr p{grid-column:1/-1;margin:0;font-size:.8rem;color:var(--muted)}
+.fixtures{display:flex;flex-direction:column;gap:10px}
+.fixtures.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:820px){.fixtures.three{grid-template-columns:minmax(0,1fr)}}
+.fx{border-radius:14px;padding:12px 14px;background:var(--panel-solid);border:1px solid var(--line);border-left:4px solid var(--c)}
+.fx .fn{font-size:.86rem;font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.fx .fv{font-size:1.6rem;font-weight:850;color:var(--c);font-variant-numeric:tabular-nums;margin:2px 0 6px}
+.fx .fv small{font-size:.8rem;color:var(--muted);font-weight:650}
+.fx > small{display:block;font-size:.76rem;color:var(--muted);margin-top:6px}
+.players{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,2fr);gap:18px;align-items:start}
+@media (max-width:960px){.players{grid-template-columns:minmax(0,1fr)}}
+.players .top{padding:18px;background:linear-gradient(135deg,#0E1A2E,#2A1660);color:#fff;border:0}
+.players .top .k{font-size:.76rem;font-weight:700;color:#C4B5FD}
+.players .top .pn{font-size:1.5rem;font-weight:850;margin:6px 0 2px}
+.players .top .pm{font-size:.8rem;color:#AEB8C9;margin-bottom:14px}
+.players .pg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.players .pg div{background:rgba(255,255,255,.07);border-radius:12px;padding:10px}
+.players .pg b{display:block;font-size:1.3rem;font-weight:850;filter:brightness(1.6)}
+.players .pg span{font-size:.72rem;color:#AEB8C9}
+.oppo{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:16px 20px;border-radius:18px;background:linear-gradient(135deg,#0E1A2E,#2A1660);color:#fff;margin-bottom:22px}
+.oppo span{font-size:.78rem;font-weight:750;color:#C4B5FD}
+.oppo p{margin:0;font-size:.98rem;line-height:1.5}
+.oppo b{font-size:1.2rem;color:#DDD6FE}
+.cap{display:flex;align-items:center;gap:10px;font-size:.85rem;font-weight:650;color:var(--muted)}
+.cap input{width:110px;font:inherit;font-weight:750;color:var(--ink);padding:9px 12px;border-radius:12px;border:1px solid var(--line);background:#fff}
+.tbl.scroll{max-height:420px;overflow:auto}
+.tbl.scroll th{position:sticky;top:0;background:#F5F2FD}
+.row-btn{margin-top:12px}
+.agechart{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:end;height:220px;padding-top:20px}
+.ag{display:flex;flex-direction:column;align-items:center;height:100%;gap:6px}
+.ag .bars{flex:1;width:100%;display:flex;gap:6px;align-items:flex-end;justify-content:center}
+.ag .bars i{position:relative;width:min(34px,40%);border-radius:8px 8px 3px 3px;transform-origin:bottom;animation:growY 1s cubic-bezier(.2,.8,.2,1) both}
+.ag .bars i span{position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:.7rem;font-weight:750;color:var(--muted);white-space:nowrap;font-style:normal}
+.ag .bars i.cur{background:var(--blue)}
+.ag .bars i.tgt{background:var(--brand);animation-delay:.1s}
+.ag b{font-size:.82rem}
+.ag small{font-size:.74rem;font-weight:750}
+.markets{margin:0;padding:0;list-style:none;counter-reset:m}
+.markets li{counter-increment:m;position:relative;padding:12px 0 12px 40px;border-top:1px solid var(--line)}
+.markets li:first-child{border-top:0}
+.markets li::before{content:counter(m);position:absolute;left:0;top:12px;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:var(--brand);color:#fff;font-weight:850;font-size:.85rem}
+.markets li b{margin-right:8px}
+.markets li p{margin:6px 0 0;font-size:.84rem;line-height:1.5;color:#3B475C}
+.demo-banner{border-radius:16px;padding:14px 18px;margin-bottom:22px;background:var(--amber-soft);border:1px solid rgba(183,121,31,.25);font-size:.9rem;line-height:1.55;color:#5B4310}
+.timeline{display:block;width:100%;height:auto}
+.catrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.gauge-svg{width:132px;height:auto;flex:none}
+.garc{stroke-dasharray:200;stroke-dashoffset:200;animation:dash 1.2s .2s cubic-bezier(.2,.8,.2,1) forwards}
+.donut-svg{width:180px;height:180px;flex:none}
+.donutwrap .seglist{flex:1;min-width:170px}
+.viz.noviz canvas{display:none}
+</style>
+</head>
+<body>
+<div id="landing" hidden aria-label="FanIntel results reveal">
+<main class="stage" id="L_stage">
+  <canvas id="L_c" aria-hidden="true"></canvas>
+  <header class="hud">
+    <a class="logo" href="#" aria-label="FanIntel">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="7" fill="#6D28D9"/><path d="M5 13.5h3l2-5 3.2 9 2.3-6 1.2 2H19" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      FanIntel
+    </a>
+    <button class="ghost-btn" id="L_skip" type="button">Skip to results</button>
+  </header>
+
+  <div class="panel" id="L_crm" aria-hidden="true">
+    <h3><i></i><span id="L_file">CRM overview</span></h3>
+    <div class="big" id="L_crmNum">0</div>
+    <div class="lbl">Fan records</div>
+    <svg viewBox="0 0 320 46" preserveAspectRatio="none">
+      <path class="f" d="M2 42 L40 37 L70 39 L104 30 L140 32 L176 22 L210 24 L246 13 L280 15 L318 4 L318 46 L2 46Z"/>
+      <path class="l" d="M2 42 L40 37 L70 39 L104 30 L140 32 L176 22 L210 24 L246 13 L280 15 L318 4"/>
+    </svg>
+    <div class="tiles">
+      <div class="tile"><b id="L_fields">11</b><span>Data fields</span></div>
+      <div class="tile"><b id="L_matched">0</b><span>FanIntel matches</span></div>
+      <div class="tile"><b>Today</b><span>Last sync</span></div>
+    </div>
+  </div>
+
+  <section class="copy" id="L_copy" aria-live="polite">
+    <p id="L_lead" class="line"><span></span></p>
+    <div class="num-wrap">
+      <div id="L_num">0</div>
+      <svg class="ring" id="L_ring" viewBox="0 0 200 100" preserveAspectRatio="none" aria-hidden="true">
+        <path pathLength="1" d="M60 8C20 14 3 36 6 56c4 26 46 40 98 38 52-2 92-22 90-48C192 18 150 4 96 5 70 6 44 12 30 22"/>
+      </svg>
+    </div>
+    <p id="L_tag"></p>
+  </section>
+
+  <div class="panel side" id="L_weights" aria-hidden="true">
+    <h3><i></i>How the FanIntel Score is built</h3>
+    <div class="bar"><div class="row"><span>Fan engagement</span><b>30%</b></div><div class="track"><div class="fill" style="--w:1"></div></div></div>
+    <div class="bar"><div class="row"><span>Ticket demand</span><b>25%</b></div><div class="track"><div class="fill" style="--w:.833"></div></div></div>
+    <div class="bar"><div class="row"><span>Fan risk (inverted)</span><b>20%</b></div><div class="track"><div class="fill" style="--w:.667"></div></div></div>
+    <div class="bar"><div class="row"><span>Content engagement</span><b>15%</b></div><div class="track"><div class="fill" style="--w:.5"></div></div></div>
+    <div class="bar"><div class="row"><span>Cohort health</span><b>10%</b></div><div class="track"><div class="fill" style="--w:.333"></div></div></div>
+  </div>
+  <div class="panel side" id="L_signals" aria-hidden="true">
+    <h3><i></i>What FanIntel found</h3>
+    <div class="sig"><em>1</em><span id="L_f1"></span></div>
+    <div class="sig"><em>2</em><span id="L_f2"></span></div>
+    <div class="sig"><em>3</em><span id="L_f3"></span></div>
+  </div>
+
+  <section class="cta" id="L_cta">
+    <p id="L_ctaText">Your full overview, fan and player intelligence, sponsorship, matchday and acquisition views are ready.</p>
+    <div class="cta-row">
+      <button class="btn btn-primary" id="L_results" type="button">See full results</button>
+    </div>
+    <p class="count" id="L_count" aria-live="polite"></p>
+    <div>
+    </div>
+    <button class="linkbtn" id="L_replay" type="button">Watch again</button>
+    <div class="credit">Built by <a href="https://www.linkedin.com/in/kush-savant-1894a1307" target="_blank" rel="noopener">Kush Savant</a>, MSc Sports Analytics, Loughborough University London</div>
+  </section>
+  <div class="progress"><span id="L_bar"></span></div>
+</main>
+</div>
+<canvas id="field" aria-hidden="true"></canvas>
+
+<header class="hud">
+  <a class="logo" href="#" id="home" aria-label="FanIntel home">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="7" fill="#6D28D9"/><path d="M5 13.5h3l2-5 3.2 9 2.3-6 1.2 2H19" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    FanIntel
+  </a>
+  <nav class="steps" aria-label="Progress">
+    <span class="on" id="s1"><i>1</i><b>Upload</b></span>
+    <span id="s2"><i>2</i><b>Check columns</b></span>
+    <span id="s3"><i>3</i><b>Results</b></span>
+  </nav>
+</header>
+
+<!-- ================= UPLOAD ================= -->
+<div class="wrap" id="viewUpload">
+  <div class="upgrid">
+    <section>
+      <h1>Upload your fan database</h1>
+      <p class="lede">Any CSV from your ticketing or CRM system works. FanIntel matches your columns, scores every fan's engagement and turns it into risk, matchday and sponsorship decisions.</p>
+      <div class="panel tilt drop" id="drop" tabindex="0" role="button" aria-label="Choose a CSV file to upload">
+        <div class="inner">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg></div>
+          <h2>Drop your CSV here</h2>
+          <p>or click to choose a file</p>
+          <small>CSV up to 200 MB</small>
+        </div>
+        <input type="file" id="file" accept=".csv,text/csv">
+      </div>
+
+      <div class="panel summary" id="summary" aria-live="polite">
+        <div class="file">
+          <div class="badge">CSV</div>
+          <div><b id="fname">file.csv</b><span id="fsize"></span></div>
+          <button class="btn btn-ghost btn-sm" id="change" type="button">Change file</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><b id="rows">0</b><span>Fans</span></div>
+          <div class="stat"><b id="cols">0</b><span>Columns</span></div>
+          <div class="stat"><b id="feat">0/10</b><span>FanIntel columns matched</span></div>
+        </div>
+        <div class="preview"><table id="table"></table></div>
+        <div class="msg" id="msg"></div>
+        <div class="go">
+          <p id="goNote">Preview shows the first 5 rows.</p>
+          <button class="btn btn-primary" id="score" type="button">Score my fans</button>
+        </div>
+      </div>
+
+      <div class="actions" id="actions">
+        <button class="btn btn-primary" id="sample" type="button">Try with sample data</button>
+      </div>
+      <div class="privacy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        Your file is read in your browser. Fan data never leaves your computer.
+      </div>
+    </section>
+
+    <aside class="panel tilt cols" aria-labelledby="colsTitle">
+      <h3 id="colsTitle">What each column unlocks</h3>
+      <p class="sub">The four core columns unlock the full dashboard. Names don't have to match exactly.</p>
+      <div id="colList"></div>
+      <div class="copyrow"><span>Building a file from scratch?</span><button id="copy" type="button">Copy column headers</button></div>
+    </aside>
+  </div>
+</div>
+
+<!-- ================= RESULTS ================= -->
+<div class="wrap" id="viewResults" hidden>
+  <div class="rhead">
+    <div class="meta" id="rmeta"></div>
+    <button class="btn btn-ghost btn-sm" id="newUpload" type="button">New upload</button>
+  </div>
+  <nav class="tabs" aria-label="Sections">
+    <button class="tab on" type="button" data-tab="overview">Overview</button>
+    <button class="tab" type="button" data-tab="fans">Fans &amp; Players</button>
+    <button class="tab" type="button" data-tab="sponsor">Sponsorship</button>
+    <button class="tab" type="button" data-tab="matchday">Matchday</button>
+    <button class="tab" type="button" data-tab="acquisition">Fan Acquisition</button>
+    <button class="tab" type="button" data-tab="welfare">Player Welfare</button>
+  </nav>
+  <div id="outlook"></div>
+</div>
+
+<div class="analysing" id="analysing" hidden>
+  <div class="panel">
+    <h3>Analysing your fanbase</h3>
+    <ul id="aSteps">
+      <li><i></i>Matching your columns</li>
+      <li><i></i>Scoring fan engagement</li>
+      <li><i></i>Finding at-risk cohorts</li>
+      <li><i></i>Building your FanIntel Score</li>
+    </ul>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+/* FanIntel WSL scoring engine: JavaScript port of csv_processor.py + data.compute_fan_risk_score.
+   Deterministic parts mirror the Python exactly. Parts the Python fills with random numbers are
+   either calculated from the uploaded columns or set to their expected value, and flagged "modelled". */
+const FanIntel = (() => {
+  const NA = new Set(["", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND", "1.#QNAN", "<NA>", "N/A", "NA", "NULL", "NaN", "None", "n/a", "nan", "null"]);
+  const isNA = v => v === undefined || v === null || (typeof v === "number" && isNaN(v)) || NA.has(String(v));
+  let NOW = Date.now();
+
+  /* ---------- python / numpy helpers ---------- */
+  const halfEven = y => { const f = Math.floor(y), d = y - f; if (d > 0.5) return f + 1; if (d < 0.5) return f; return f % 2 === 0 ? f : f + 1; };
+  const npRound = (x, dp) => { if (isNaN(x)) return NaN; const m = Math.pow(10, dp); return halfEven(x * m) / m; };
+  const pyRound = x => halfEven(x);
+  const clip = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  const nanMean = a => { let s = 0, c = 0; for (const v of a) if (!isNaN(v)) { s += v; c++; } return c ? s / c : NaN; };
+  const nanSum = a => { let s = 0; for (const v of a) if (!isNaN(v)) s += v; return s; };
+  const fsum = a => { let s = 0, c = 0; for (const x of a) { const t = s + x; c += Math.abs(s) >= Math.abs(x) ? (s - t) + x : (x - t) + s; s = t; } return s + c; };
+  function quantile(a, q) { const s = a.filter(v => !isNaN(v)).sort((x, y) => x - y); if (!s.length) return NaN; const p = (s.length - 1) * q, lo = Math.floor(p), hi = Math.ceil(p); return s[lo] + (s[hi] - s[lo]) * (p - lo); }
+  const pyMax = (a, b) => (b > a ? b : a), pyMin = (a, b) => (b < a ? b : a); // python max/min keep first arg on NaN
+  function toNum(v) {
+    if (isNA(v)) return NaN;
+    if (typeof v === "number") return v;
+    const s = String(v).trim(); if (s === "") return NaN;
+    const n = Number(s); return Number.isFinite(n) ? n : NaN;
+  }
+  function parseDate(v) {
+    if (isNA(v)) return NaN;
+    const s = String(v).trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).getTime();
+    m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+    if (m) { const a = +m[1], b = +m[2]; return a > 12 ? new Date(+m[3], b - 1, a).getTime() : new Date(+m[3], a - 1, b).getTime(); }
+    const t = Date.parse(s); return isNaN(t) ? NaN : t;
+  }
+  const daysSince = v => { const t = parseDate(v); if (isNaN(t)) return NaN; return Math.max(0, Math.floor((NOW - t) / 864e5)); };
+  function valueCounts(a) { const m = new Map(); a.forEach(v => { if (!isNA(v)) m.set(v, (m.get(v) || 0) + 1); }); return [...m.entries()].map((e, i) => [e, i]).sort((x, y) => y[0][1] - x[0][1] || x[1] - y[1]).map(x => x[0]); }
+
+  /* ---------- column detection (rapidfuzz extractOne, fuzz.ratio, cutoff 72) ---------- */
+  const CANONICAL_COLUMNS = {
+    Fan_ID: ["fan_id", "fanid", "id", "fan id", "customer_id", "customerid", "member_id", "uid", "fan_number"],
+    Age: ["age", "fan_age", "age_years", "age_band", "fan_age_years", "customer_age"],
+    Gender: ["gender", "sex", "fan_gender", "customer_gender"],
+    Last_Attended: ["last_attended", "last_attendance", "last_visit", "last_ticket_date", "last_match", "date_last_attended", "last_game", "date_of_last_attendance"],
+    Tickets_Purchased: ["tickets_purchased", "tickets", "num_tickets", "ticket_count", "tickets_bought", "total_tickets", "ticket_quantity", "number_of_tickets"],
+    Spend: ["spend", "total_spend", "revenue", "total_revenue", "fan_spend", "ltv", "lifetime_value", "customer_spend", "cumulative_spend"],
+    Favourite_Player: ["favourite_player", "favorite_player", "fav_player", "preferred_player", "top_player", "fav player", "favourite player"],
+    Channel_Preference: ["channel_preference", "preferred_channel", "channel", "comms_channel", "pref_channel", "communication_channel"],
+    Membership_Type: ["membership_type", "membership", "fan_type", "tier", "subscription_type", "member_type", "fan_tier"],
+    Postcode_District: ["postcode_district", "postcode", "postal_code", "zip_code", "district", "area_code", "zip"]
+  };
+  const COLUMN_INFO = {
+    Fan_ID: "Identifies each fan", Age: "Fan cohorts and age mix", Gender: "Audience profile for sponsors",
+    Last_Attended: "Churn risk and lapsed fans", Tickets_Purchased: "Ticket demand and attendance",
+    Spend: "Revenue concentration", Favourite_Player: "Player intelligence", Channel_Preference: "Campaign channels",
+    Membership_Type: "Matchday segments", Postcode_District: "Where your fans live"
+  };
+  const CORE_COLUMNS = ["Fan_ID", "Age", "Last_Attended", "Tickets_Purchased"];
+  const FEATURE_GATES = { fan_cohorts: ["Age"], churn_risk: ["Last_Attended"], attendance_prediction: ["Last_Attended", "Tickets_Purchased"], player_intelligence: ["Favourite_Player"], commercial_impact: ["Spend"], campaign_recs: ["Channel_Preference"], sentiment: [], geo_analysis: ["Postcode_District"] };
+  function lcs(a, b) { const m = a.length, n = b.length; let p = new Array(n + 1).fill(0), c = new Array(n + 1).fill(0); for (let i = 1; i <= m; i++) { for (let j = 1; j <= n; j++) c[j] = a[i - 1] === b[j - 1] ? p[j - 1] + 1 : Math.max(p[j], c[j - 1]); [p, c] = [c, p]; } return p[n]; }
+  const ratio = (a, b) => (a.length + b.length) ? 200 * lcs(a, b) / (a.length + b.length) : 100;
+  function detectColumns(headers) {
+    const v2c = new Map();
+    for (const [canon, vs] of Object.entries(CANONICAL_COLUMNS)) for (const v of vs) { const k = v.toLowerCase().replace(/ /g, "_"); if (!v2c.has(k)) v2c.set(k, canon); }
+    const variants = [...v2c.keys()], colMap = {}, seen = new Map();
+    headers.forEach(c => seen.set(c.toLowerCase().replace(/ /g, "_").replace(/-/g, "_"), c));
+    for (const [norm, orig] of seen) {
+      let best = null, bs = -1;
+      for (const v of variants) { const s = ratio(norm, v); if (s > bs) { bs = s; best = v; } }
+      if (best !== null && bs >= 72) { const canon = v2c.get(best); if (!(canon in colMap)) colMap[canon] = orig; }
+    }
+    return colMap;
+  }
+  const checkFeatures = cm => Object.fromEntries(Object.entries(FEATURE_GATES).map(([f, g]) => [f, g.every(c => c in cm)]));
+
+  /* ---------- engagement (FanIntel Engagement Score, 0-100) ---------- */
+  function engagement(D) {
+    const n = D.n, cm = D.cm, parts = [];
+    if (cm.Last_Attended) parts.push(D.days.map(d => isNaN(d) ? NaN : clip(100 - (clip(d, 0, 365) / 365 * 80), 20, 100)));
+    if (cm.Tickets_Purchased) { const t = D.tickets, mx = Math.max(quantile(t, .95), 1); parts.push(t.map(x => isNaN(x) ? NaN : clip(20 + clip(x, 0, mx) / mx * 70, 20, 90))); }
+    if (cm.Spend) { const s = D.spend, mx = Math.max(quantile(s, .95), 1); parts.push(s.map(x => isNaN(x) ? NaN : clip(20 + clip(x, 0, mx) / mx * 70, 20, 90))); }
+    if (!parts.length) return new Array(n).fill(65);
+    return Array.from({ length: n }, (_, i) => { let s = 0; for (const p of parts) s += p[i]; return npRound(s / parts.length, 1); });
+  }
+
+  /* ---------- KPIs ---------- */
+  function kpis(D) {
+    const k = {};
+    k.sentiment_score = pyRound(nanMean(D.eng));
+    k.demand_index = D.cm.Tickets_Purchased ? npRound(D.tickets.filter(x => x > 0).length / D.n, 2) : 0.70;
+    let rec = 60;
+    if (D.cm.Last_Attended) rec = Math.min(100, Math.max(0, nanMean(D.days) / 3.65));
+    const r = npRound((100 - k.sentiment_score) * 0.35 + (100 - k.demand_index * 100) * 0.30 + rec * 0.35, 1);
+    k.overall_risk = Math.max(5, Math.min(95, r));
+    k.risk_alerts = 0;
+    return k;
+  }
+
+  /* ---------- cohorts ---------- */
+  const COHORT_ACTIONS = {
+    "18–24 Casual": { channel: "TikTok + Instagram", timing: "48 hr before next home fixture", trigger: "No attendance in 60 days", offer: "£5 off first ticket" },
+    "25–34 Regular": { channel: "Email + App push notification", timing: "3 weeks before season ticket window opens", trigger: "Season ticket not yet renewed", offer: "Priority seat selection + early-bird price lock" },
+    "35–49 Loyalist": { channel: "Email + Direct mail", timing: "Day 7 of renewal window if not yet completed", trigger: "Renewal not completed", offer: "Complimentary hospitality upgrade voucher" },
+    "50+ Veteran": { channel: "Email + personalised letter", timing: "End of season", trigger: "Multi-year membership anniversary", offer: "Legacy recognition + personalised captain's letter" },
+    "Lapsed Buyers": { channel: "Email + SMS", timing: "Next derby announcement", trigger: "No attendance in 180+ days", offer: "30% win-back discount + 'what you missed' highlight reel" }
+  };
+  const BANDS = [["18–24 Casual", 18, 24], ["25–34 Regular", 25, 34], ["35–49 Loyalist", 35, 49], ["50+ Veteran", 50, 200]];
+  function cohorts(D) {
+    const out = [], n = D.n;
+    if (!D.cm.Age) return out;
+    for (const [name, lo, hi] of BANDS) {
+      const ix = []; D.age.forEach((a, i) => { if (a >= lo && a <= hi) ix.push(i); });
+      const count = ix.length; let risk = 50, eng = 50;
+      if (D.cm.Last_Attended && count > 0) { const m = nanMean(ix.map(i => D.days[i])); risk = Math.trunc(pyMin(95, pyMax(10, m / 3.65))); if (isNaN(risk)) risk = 10; }
+      if (count > 0) { const m = nanMean(ix.map(i => D.eng[i])); eng = pyRound(m); }
+      out.push({ name, size_pct: pyRound(count / n * 100), risk_score: risk, engagement: eng, count, ...COHORT_ACTIONS[name] });
+    }
+    if (D.cm.Last_Attended) {
+      const ix = []; D.days.forEach((d, i) => { if (d > 180) ix.push(i); });
+      if (ix.length) out.push({ name: "Lapsed Buyers", size_pct: pyRound(ix.length / n * 100), risk_score: Math.trunc(Math.min(95, nanMean(ix.map(i => D.days[i])) / 3.65)), engagement: 15, count: ix.length, ...COHORT_ACTIONS["Lapsed Buyers"] });
+    }
+    return out;
+  }
+
+  /* ---------- churn ---------- */
+  const PROFILES = [
+    { name: "18–24 Casual", lo: 18, hi: 24, base: 38, lapsed: false, retention: "TikTok-first content series + £5 first-ticket discount code" },
+    { name: "25–34 Regular", lo: 25, hi: 34, base: 22, lapsed: false, retention: "Early-bird season ticket offer + priority seat selection window" },
+    { name: "35–49 Loyalist", lo: 35, hi: 49, base: 11, lapsed: false, retention: "Auto-renewal prompt + complimentary hospitality upgrade voucher" },
+    { name: "50+ Veteran", lo: 50, hi: 200, base: 8, lapsed: false, retention: "Legacy membership recognition + personalised captain's letter" },
+    { name: "Lapsed Buyers", lo: 0, hi: 200, base: 72, lapsed: true, retention: "Win-back email: 30% off + personalised 'what you missed' reel" }
+  ];
+  function churn(D) {
+    if (!D.cm.Last_Attended) return [];
+    const p25 = quantile(D.days, .25), p90 = quantile(D.days, .90);
+    return PROFILES.map(p => {
+      const ix = [];
+      for (let i = 0; i < D.n; i++) { const ok = p.lapsed ? D.days[i] > 180 : (D.cm.Age ? (D.age[i] >= p.lo && D.age[i] <= p.hi) : true); if (ok) ix.push(i); }
+      let c;
+      if (!ix.length) c = p.base;
+      else { const avg = nanMean(ix.map(i => D.days[i])), r = (avg - p25) / Math.max(p90 - p25, 1); c = p.base + r * 30; c = pyMax(3, pyMin(95, c)); }
+      c = npRound(c, 1);
+      return { name: p.name, churn_pct: c, retention_action: p.retention, risk_level: c >= 55 ? "HIGH" : c >= 28 ? "MED" : "LOW" };
+    });
+  }
+
+  /* ---------- player influence ---------- */
+  function players(D) {
+    const col = D.cm.Favourite_Player; if (!col) return [];
+    const vals = D.cols[col], counts = valueCounts(vals), overall = nanMean(D.eng), out = [];
+    for (const [player, cnt] of counts.slice(0, 10)) {
+      if (String(player).trim() === "") continue;
+      const pct = cnt / D.n, ix = []; vals.forEach((v, i) => { if (v === player) ix.push(i); });
+      let ev = overall; if (ix.length) { const m = nanMean(ix.map(i => D.eng[i])); if (!isNaN(m)) ev = m; }
+      const lift = npRound(ev - overall, 1), mult = overall > 0 ? npRound(ev / overall, 1) : 1, merch = Math.min(100, Math.trunc(pct * 500));
+      out.push({ name: String(player), sentiment_lift: lift, engagement_mult: mult, merch_index: merch, marketing_value: Math.trunc(pyRound(lift * 3 + mult * 10 + merch * 0.5)), fan_count: cnt });
+    }
+    return out.map((p, i) => [p, i]).sort((a, b) => b[0].marketing_value - a[0].marketing_value || a[1] - b[1]).map(x => x[0]);
+  }
+
+  /* ---------- signals ---------- */
+  function signals(D, k) {
+    const s = [], n = D.n;
+    if (D.cm.Last_Attended) {
+      const lp = pyRound(D.days.filter(d => d > 180).length / n * 100);
+      if (lp > 20) s.push({ priority: "HIGH", title: `${lp}% of fans lapsed (180+ days)`, desc: `${Math.trunc(n * lp / 100).toLocaleString("en-GB")} fans haven't attended in 6+ months. Immediate win-back opportunity before next home fixture.`, source: "From your data", action: "Launch win-back email series with 30% discount + matchday reel" });
+    }
+    const low = pyRound(D.eng.filter(e => e < 30).length / n * 100);
+    if (low > 20) s.push({ priority: "HIGH", title: `${low}% of fans have low engagement`, desc: "FanIntel's engagement model shows a large segment scoring below 30/100. Digital re-engagement campaign needed, personalised content by channel.", source: "FanIntel", action: "Personalised digital re-engagement campaign by preferred channel" });
+    if (k.demand_index < 0.65) s.push({ priority: k.demand_index < 0.5 ? "HIGH" : "MED", title: `Ticket conversion gap: only ${pyRound(k.demand_index * 100)}% active buyers`, desc: `Only ${pyRound(k.demand_index * 100)}% of your fan database has purchased tickets. The non-buyer segment is the biggest short-term revenue opportunity.`, source: "From your data", action: "Targeted ticket campaign to non-buyer segments" });
+    if (D.cm.Spend) {
+      const thr = quantile(D.spend, .8), share = nanSum(D.spend.filter(x => x >= thr)) / nanSum(D.spend) * 100;
+      s.push({ priority: "MED", title: `Top 20% of fans drive ${pyRound(share)}% of revenue`, desc: "Revenue is highly concentrated, consistent with the WSL top-tier pattern. Protecting this cohort via VIP loyalty is a critical commercial lever.", source: "From your data", action: "Introduce tiered VIP loyalty scheme for top 20% spenders" });
+    }
+    s.push({ priority: "OPT", title: "Pre-match content window underused", desc: "Fan engagement peaks 48 hr before kickoff. Schedule 2 posts per match window.", source: "Modelled", action: "Automate pre-match content scheduler" });
+    return s.slice(0, 4);
+  }
+
+  /* ---------- fixture risk (data.compute_fan_risk_score) ---------- */
+  function fixtureRisk(sent, dem) {
+    const form = ["W", "D", "W", "L", "W"], fs = Math.max(0, 100 - form.filter(x => x === "L").length * 20 - form.filter(x => x === "D").length * 8);
+    const fx = [
+      { opponent: "Next Home Fixture", home: true, is_rival: false, att_pct: pyRound(dem * 100), days_away: 7 },
+      { opponent: "Away Fixture", home: false, is_rival: false, att_pct: pyRound(dem * 95), days_away: 14 },
+      { opponent: "Derby / Big Fixture", home: true, is_rival: true, att_pct: Math.min(100, pyRound(dem * 120)), days_away: 21 }
+    ];
+    const fr = fx.map(f => {
+      const adj = Math.min(100, f.att_pct + (f.is_rival ? 25 : 0)), urg = Math.max(0, 20 - f.days_away);
+      let r = 100 - (sent * 0.35 + fs * 0.30 + adj * 0.20 + urg * 0.15); r = Math.max(5, Math.min(95, r));
+      return { ...f, risk_score: npRound(r, 1), risk_level: r >= 65 ? "HIGH" : r >= 40 ? "MED" : "LOW", form_score: fs };
+    });
+    return { fixture_risks: fr, overall_risk: npRound(fr.reduce((a, b) => a + b.risk_score, 0) / fr.length, 1) };
+  }
+
+  /* ---------- modelled pieces: expected values instead of Python's random jitter ---------- */
+  function attendance(k) {
+    const base = pyRound(k.demand_index * 100), sent = k.sentiment_score;
+    return [["Next Home Fixture", true, false, 7], ["Away Fixture", false, false, 14], ["Derby / Big Fixture", true, true, 21]].map(([opp, home, rival, days]) => {
+      const sa = (sent - 60) * 0.15, db = rival ? 10 : 0, da = Math.max(0, (20 - days) / 20) * 4;
+      const p = Math.max(15, Math.min(100, base + sa + db + da));
+      return { opponent: opp, home, is_rival: rival, days_away: days, predicted_pct: npRound(p, 1), low: npRound(Math.max(10, p - 6), 1), high: npRound(Math.min(100, p + 6), 1), at_risk: p < 70, drivers: { historical: base, sentiment_adj: npRound(sa, 1), derby_bonus: db } };
+    });
+  }
+  function sponsorExposure(k) {
+    const sent = k.sentiment_score, dem = pyRound(k.demand_index * 100), avg = 57;
+    const fx = [["Next Home Fixture", true, false, dem], ["Away Fixture", false, false, pyRound(dem * 0.9)], ["Derby / Big Fixture", true, true, Math.min(100, pyRound(dem * 1.2))]];
+    return { league_avg: avg, fixtures: fx.map(([opp, home, rival, att]) => {
+      const content = Math.min(100, sent * 0.8 + 15), broadcast = rival ? 78.5 : 46.5;
+      const idx = npRound(Math.min(100, Math.max(10, (content * 0.30 + sent * 0.25 + broadcast * 0.28 + att * 0.17) * (rival ? 1.45 : 1))), 1);
+      return { opponent: opp, home, is_rival: rival, att_pct: att, sponsor_index: idx, vs_benchmark: npRound(idx - avg, 1), broadcast_reach: broadcast, is_premium: idx >= 75 };
+    }) };
+  }
+
+  /* ---------- pages beyond the dashboard, calculated from the uploaded columns ---------- */
+  const share = (arr, test) => arr.length ? arr.filter(test).length / arr.length * 100 : 0;
+  function largestRemainder(vals) { // integer percentages that add to 100
+    const tot = vals.reduce((a, b) => a + b, 0) || 1, raw = vals.map(v => v / tot * 100), fl = raw.map(Math.floor);
+    let left = 100 - fl.reduce((a, b) => a + b, 0);
+    raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { fl[i]++; left--; } });
+    return fl;
+  }
+  const AGE4 = [["18-25", 0, 25], ["26-35", 26, 35], ["36-45", 36, 45], ["46+", 46, 999]];
+  function ageMix(D) { if (!D.cm.Age) return null; const a = D.age.filter(x => !isNaN(x)); return largestRemainder(AGE4.map(([, lo, hi]) => a.filter(x => x >= lo && x <= hi).length)); }
+  const normTier = v => { const s = String(v).toLowerCase(); if (/season/.test(s)) return "Season Ticket"; if (/hospital|vip|premium|box/.test(s)) return "Hospitality"; if (/laps|former|expired/.test(s)) return "Lapsed"; if (/member/.test(s)) return "Member"; if (/general|admission|casual|ga\b|standard/.test(s)) return "General Admission"; return "Other"; };
+
+  function sponsorship(D, k) {
+    const pitch = Math.min(100, Math.max(30, pyRound(k.sentiment_score * 0.35 + k.demand_index * 100 * 0.30 + (100 - k.overall_risk) * 0.25 + 5)));
+    const base = pyRound(k.demand_index * 100 * 0.4 + k.sentiment_score * 0.3 + (100 - k.overall_risk) * 0.3);
+    let gender = null;
+    if (D.cm.Gender) {
+      const g = D.cols[D.cm.Gender].filter(v => !isNA(v)).map(v => { const s = String(v).trim().toLowerCase(); return /^(f|female|woman|women)$/.test(s) ? "Female" : /^(m|male|man|men)$/.test(s) ? "Male" : /prefer|unknown|not/.test(s) ? "Not stated" : "Non-binary / other"; });
+      const order = ["Female", "Male", "Non-binary / other", "Not stated"], pc = largestRemainder(order.map(o => g.filter(x => x === o).length));
+      gender = order.map((o, i) => [o, pc[i], g.filter(x => x === o).length]).filter(x => x[2] > 0);
+    }
+    const age = ageMix(D);
+    let areas = null;
+    if (D.cm.Postcode_District) { const vc = valueCounts(D.cols[D.cm.Postcode_District].map(v => isNA(v) ? v : String(v).trim().toUpperCase().replace(/\s.*/, ""))), tot = vc.reduce((a, b) => a + b[1], 0); areas = vc.slice(0, 6).map(([a, c]) => [a, c, c / tot * 100]); }
+    let segs = null;
+    if (D.cm.Membership_Type) {
+      const m = new Map(); D.cols[D.cm.Membership_Type].forEach((v, i) => { if (isNA(v)) return; const t = normTier(v); if (!m.has(t)) m.set(t, []); m.get(t).push(i); });
+      const order = ["Hospitality", "Season Ticket", "Member", "General Admission", "Other", "Lapsed"];
+      segs = order.filter(t => m.has(t)).map(t => { const ix = m.get(t); return { segment: t, fans: ix.length, engagement: nanMean(ix.map(i => D.eng[i])), spend: D.cm.Spend ? nanMean(ix.map(i => D.spend[i])) : null }; });
+    }
+    return { pitch, base, gender, age, core: age ? age[0] + age[1] : null, areas, segs, female: gender ? (gender.find(g => g[0] === "Female") || [0, 0])[1] : null };
+  }
+
+  const MATCHDAY = [{ name: "Season Ticket", spend: 18 }, { name: "Member", spend: 26 }, { name: "General Admission", spend: 38 }, { name: "Hospitality", spend: 95 }];
+  const DEFAULT_SPLIT = [0.35, 0.30, 0.28, 0.07];
+  function matchday(D, k, capacity = 5000) {
+    let split = DEFAULT_SPLIT, fromData = false;
+    if (D.cm.Membership_Type) {
+      const t = D.cols[D.cm.Membership_Type].filter(v => !isNA(v)).map(normTier), c = MATCHDAY.map(s => t.filter(x => x === s.name).length), tot = c.reduce((a, b) => a + b, 0);
+      if (tot > 0) { split = c.map(x => x / tot); fromData = true; }
+    }
+    const att = pyRound(capacity * pyRound(k.demand_index * 100) / 100);
+    const segs = MATCHDAY.map((s, i) => ({ segment: s.name, fans: pyRound(att * split[i]), avg_spend: s.spend, revenue: pyRound(att * split[i]) * s.spend }));
+    const revenue = segs.reduce((a, b) => a + b.revenue, 0), top = segs.reduce((a, b) => b.revenue > a.revenue ? b : a);
+    const blended = segs.reduce((a, s, i) => a + s.avg_spend * split[i], 0);
+    // hospitality targets: highly engaged fans who haven't been to a game in 90+ days
+    let targets = [];
+    if (D.cm.Last_Attended) {
+      const idCol = D.cm.Fan_ID ? D.cols[D.cm.Fan_ID] : null, ix = [];
+      for (let i = 0; i < D.n; i++) if (D.days[i] >= 90 && !isNaN(D.eng[i])) ix.push(i);
+      ix.sort((a, b) => D.eng[b] - D.eng[a] || a - b);
+      targets = ix.slice(0, 20).map(i => ({ id: idCol ? idCol[i] : `Row ${i + 2}`, engagement: D.eng[i], months: Math.max(3, pyRound(D.days[i] / 30.4)), spend: D.cm.Spend ? D.spend[i] : null, tier: D.cm.Membership_Type ? D.cols[D.cm.Membership_Type][i] : null }));
+    }
+    const nonBuyers = D.cm.Tickets_Purchased ? D.tickets.filter(x => !(x > 0)).length : null;
+    return { capacity, att, segs, revenue, top, blended, split, fromData, targets, nonBuyers, upside10: pyRound(att * 0.10 * MATCHDAY[2].spend) };
+  }
+
+  const ACQ_MARKETS = [
+    ["United States", "Digital-first: TikTok + YouTube highlight clips, partner with NWSL fanbases", 82],
+    ["Australia", "Matildas halo effect post-2023 WWC, streaming deal push, timezone-friendly content", 76],
+    ["Germany", "Bundesliga W cross-promotion, German-language content, DFB tie-ins", 71],
+    ["Spain", "Liga F fan crossover, Instagram-led campaign, Spanish influencer partnerships", 66],
+    ["Netherlands", "OranjeLeeuwinnen connection, Dutch player ambassador content", 61],
+    ["Canada", "CanWNT fan base, membership trial offer, bilingual content", 57],
+    ["Brazil", "Fastest-growing women's football market, YouTube-first content strategy", 53],
+    ["Japan", "Nadeshiko crossover, merchandise appeal, streaming subscription push", 48]
+  ];
+  const AGE_TARGET = [30, 32, 24, 14];
+  function acquisition(D, k) {
+    const current = ageMix(D) || [22, 35, 28, 15];
+    const gap = AGE_TARGET.map((t, i) => t - current[i]);
+    let worst = 0; gap.forEach((g, i) => { if (g > gap[worst]) worst = i; }); if (gap[worst] <= 0) gap.forEach((g, i) => { if (Math.abs(g) > Math.abs(gap[worst])) worst = i; });
+    const lift = pyRound((k.sentiment_score - 50) * 0.2 + (k.demand_index * 100 - 60) * 0.1);
+    const markets = ACQ_MARKETS.map(([country, activation, p]) => ({ country, activation, priority: Math.max(20, Math.min(95, p + lift)) }));
+    let areas = null;
+    if (D.cm.Postcode_District) {
+      const by = new Map(); D.cols[D.cm.Postcode_District].forEach((v, i) => { if (isNA(v)) return; const a = String(v).trim().toUpperCase().replace(/\s.*/, ""); if (!by.has(a)) by.set(a, []); by.get(a).push(i); });
+      areas = [...by.entries()].map(([a, ix]) => ({ area: a, fans: ix.length, engagement: nanMean(ix.map(i => D.eng[i])), lapsed: D.cm.Last_Attended ? ix.filter(i => D.days[i] > 180).length / ix.length * 100 : null }))
+        .sort((x, y) => y.fans - x.fans).slice(0, 8);
+    }
+    return { current, target: AGE_TARGET, gap, worst, labels: AGE4.map(a => a[0]), fromData: !!D.cm.Age, markets, areas };
+  }
+
+  /* ---------- player welfare: synthetic safeguarding demo, anonymised ---------- */
+  function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const WELFARE_TEMPLATES = [
+    ["Threat", 92, "Watch your back {p}, you don't belong in this league"], ["Threat", 88, "Hope something bad happens to {p} after that"], ["Threat", 85, "{p} better not show up to the next game, just saying"],
+    ["Slur", 94, "Can't believe they let {p} play, absolute [slur removed]"], ["Slur", 91, "{p} [slur removed] deserved to miss that penalty"],
+    ["Identity attack", 81, "{p} shouldn't be playing, people like her ruin the sport"], ["Identity attack", 78, "{p} and her type have no place in sport"],
+    ["Abuse", 62, "{p} is genuinely pathetic, fraud of a footballer"], ["Abuse", 55, "Overrated, {p} should be dropped permanently"], ["Abuse", 50, "{p} can't even trap a ball, waste of a shirt"], ["Abuse", 58, "{p} is the worst signing this season"]
+  ];
+  function welfare() {
+    const r = mulberry(2025), pick = a => a[Math.floor(r() * a.length)];
+    const players = ["Player A", "Player B", "Player C", "Player D", "Player E"], weights = [.32, .24, .18, .15, .11];
+    const plat = ["X / Twitter", "Instagram", "YouTube"], matchDays = [3, 10, 17, 24];
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const recs = [], n = 110 + Math.floor(r() * 50), pool = Array.from({ length: 24 }, () => `account_${1000 + Math.floor(r() * 9000)}`), aw = pool.map((_, i) => 1 / (i + 1.5));
+    const awT = aw.reduce((a, b) => a + b, 0), pickAcc = () => { let u = r() * awT, i = 0; while (u > aw[i] && i < pool.length - 1) { u -= aw[i]; i++; } return pool[i]; };
+    for (let i = 0; i < n; i++) {
+      const t = pick(WELFARE_TEMPLATES);
+      let u = r(), pi = 0; while (u > weights[pi] && pi < 4) { u -= weights[pi]; pi++; }
+      const md = pick(matchDays), daysAgo = Math.max(0, Math.min(29, md + Math.round((r() - .5) * 3 * (r() < .7 ? 1 : 6))));
+      const near = matchDays.some(m => Math.abs(m - daysAgo) < 2);
+      const score = Math.min(100, t[1] + Math.floor(r() * 17) - 8 + (near ? 5 : 0));
+      const pu = r(), p = pu < .55 ? plat[0] : pu < .85 ? plat[1] : plat[2];
+      recs.push({ daysAgo, player: players[pi], platform: p, category: t[0], text: t[2].replace("{p}", players[pi]), score, severity: score >= 80 ? "HIGH" : score >= 55 ? "MED" : "LOW", account: pickAcc() });
+    }
+    return { recs, matchDays, today };
+  }
+
+  /* ---------- run ---------- */
+  function run(headers, rows, opts = {}) {
+    const cm = detectColumns(headers), n = rows.length;
+    const cols = {}; headers.forEach(h => { cols[h] = rows.map(r => r[h]); });
+    const D = { n, cm, cols, headers };
+    D.days = cm.Last_Attended ? cols[cm.Last_Attended].map(daysSince) : null;
+    D.tickets = cm.Tickets_Purchased ? cols[cm.Tickets_Purchased].map(toNum) : null;
+    D.spend = cm.Spend ? cols[cm.Spend].map(toNum) : null;
+    D.age = cm.Age ? cols[cm.Age].map(toNum) : null;
+    D.eng = engagement(D);
+    const features = checkFeatures(cm), coreHits = CORE_COLUMNS.filter(c => c in cm).length;
+    if (!n) return { D, cm, features, enough: false, coreHits };
+    const k = kpis(D), coh = cohorts(D), ch = churn(D), pl = players(D), sig = signals(D, k);
+    k.risk_alerts = ch.filter(c => c.risk_level === "HIGH").length;
+    const risk = fixtureRisk(k.sentiment_score, k.demand_index); k.overall_risk = risk.overall_risk;
+    const engRate = npRound(k.sentiment_score / 10, 2), cohortAvg = coh.length ? coh.reduce((a, c) => a + (100 - c.risk_score), 0) / coh.length : 50;
+    const comps = [["Engagement", k.sentiment_score * 0.30, 0.30, k.sentiment_score], ["Ticket demand", k.demand_index * 100 * 0.25, 0.25, k.demand_index * 100], ["Risk (inverted)", (100 - k.overall_risk) * 0.20, 0.20, 100 - k.overall_risk], ["Content engagement", Math.min(100, engRate * 8) * 0.15, 0.15, Math.min(100, engRate * 8)], ["Cohort health", cohortAvg * 0.10, 0.10, cohortAvg]];
+    const score = pyRound(comps.reduce((a, c) => a + c[1], 0));
+    const exposure = sponsorExposure(k), att = attendance(k);
+    const lapsed = D.days ? D.days.filter(d => d > 180).length : 0;
+    const nonBuyersActive = D.days && D.tickets ? D.days.filter((d, i) => !(d > 180) && !(D.tickets[i] > 0)).length : (D.tickets ? D.tickets.filter(x => !(x > 0)).length : 0);
+    return {
+      D, cm, features, coreHits, enough: true, kpis: k, cohorts: coh, churn: ch, players: pl, signals: sig, risk, exposure, attendance: att,
+      score: { value: score, comps, label: score >= 70 ? "Strong fan & commercial health" : score >= 50 ? "Moderate, action areas identified" : "At risk, intervention required" },
+      avgSpend: D.spend ? nanMean(D.spend) : null,
+      sponsorship: sponsorship(D, k), matchday: matchday(D, k, opts.capacity || 5000), acquisition: acquisition(D, k), welfare: welfare(),
+      reveal: { total: n, lapsed, nonBuyers: nonBuyersActive, core: n - lapsed - nonBuyersActive, hasDays: !!D.days, hasTickets: !!D.tickets }
+    };
+  }
+  return { run, detectColumns, checkFeatures, matchday, COLUMN_INFO, CANONICAL_COLUMNS, CORE_COLUMNS, pyRound, npRound, isNA, setNow: t => { NOW = t; } };
+})();
+
+
+</script>
+<script>
+const SAMPLE_CSV = `Fan_ID,Age,Gender,Last_Attended,Tickets_Purchased,Spend,Favourite_Player,Channel_Preference,Membership_Type,Postcode_District
+WSL-0001,56,Male,2026-06-28,0,29.39,Vivianne Miedema,Post,Season Ticket,EH1
+WSL-0002,43,Female,2026-09-18,0,27.92,Lauren Hemp,Post,Hospitality,E1
+WSL-0003,44,Male,2025-02-24,2,159.15,Millie Bright,App,General Admission,N2
+WSL-0004,29,Non-binary,2025-11-10,3,70.7,Rachel Daly,Email,Hospitality,CF1
+WSL-0005,23,Non-binary,2025-09-28,0,99.53,Lauren Hemp,Email,Season Ticket,E1
+WSL-0006,65,Prefer not to say,2025-12-28,2,269.96,Rachel Daly,Social,General Admission,SE1
+WSL-0007,39,Female,2025-10-22,6,489.97,Beth Mead,Post,Member,SE1
+WSL-0008,45,Male,2025-09-27,2,265.06,Chloe Kelly,Email,Member,M2
+WSL-0009,67,Non-binary,2025-12-01,12,435.99,Lauren Hemp,Social,Hospitality,L1
+WSL-0010,25,Non-binary,2026-01-22,4,197.24,Millie Bright,Post,Hospitality,B2
+WSL-0011,30,Female,2026-06-01,16,938.08,Beth Mead,SMS,Hospitality,M3
+WSL-0012,40,Female,2025-09-25,3,284.28,Vivianne Miedema,Post,General Admission,B1
+WSL-0013,23,Non-binary,2025-12-24,13,327.04,Beth Mead,Post,Season Ticket,EC1
+WSL-0014,69,Female,2025-01-04,1,116.19,Chloe Kelly,Social,Season Ticket,N1
+WSL-0015,39,Female,2025-12-10,7,223.02,Vivianne Miedema,Social,Season Ticket,CF1
+WSL-0016,65,Male,2026-06-14,4,380.66,Rachel Daly,Post,Lapsed,LS2
+WSL-0017,29,Non-binary,2025-04-16,1,119.05,Erin Cuthbert,Post,Hospitality,N1
+WSL-0018,31,Male,2026-03-04,2,150.72,Lauren Hemp,Email,Season Ticket,M2
+WSL-0019,30,Male,2026-08-12,1,91.85,Rachel Daly,Social,Member,CF1
+WSL-0020,24,Prefer not to say,2025-03-15,3,153.26,Lauren Hemp,Email,Season Ticket,LS2
+WSL-0021,38,Female,2025-08-13,3,239.78,Sam Kerr,Social,General Admission,N1
+WSL-0022,31,Male,2026-04-07,6,355.89,Rachel Daly,Social,Member,M3
+WSL-0023,44,Female,2025-04-05,0,119.91,Vivianne Miedema,SMS,Member,LS2
+WSL-0024,47,Male,2025-06-15,1,192.06,Millie Bright,Email,Hospitality,W1
+WSL-0025,66,Prefer not to say,2025-07-12,2,209.1,Beth Mead,SMS,General Admission,SW1
+WSL-0026,19,Prefer not to say,2025-03-06,0,6.86,Beth Mead,Email,Lapsed,M3
+WSL-0027,70,Male,2026-04-13,2,203.8,Millie Bright,Email,Lapsed,E1
+WSL-0028,53,Non-binary,2025-02-19,0,50.31,Rachel Daly,SMS,General Admission,E1
+WSL-0029,32,Non-binary,2025-09-10,1,103.75,Vivianne Miedema,Email,Hospitality,EH1
+WSL-0030,22,Non-binary,2026-08-06,17,536.58,Vivianne Miedema,SMS,General Admission,EC1
+WSL-0031,26,Female,2025-07-29,2,244.01,Rachel Daly,Email,Member,W1
+WSL-0032,23,Male,2026-07-03,17,457.15,Chloe Kelly,SMS,General Admission,BS1
+WSL-0033,47,Non-binary,2026-02-05,1,70.49,Sam Kerr,Email,General Admission,N2
+WSL-0034,56,Prefer not to say,2026-01-25,5,433.81,Sam Kerr,Email,Season Ticket,N2
+WSL-0035,50,Male,2026-09-14,11,681.6,Sam Kerr,App,General Admission,M2
+WSL-0036,38,Prefer not to say,2026-03-19,7,513.93,Beth Mead,SMS,Member,SE1
+WSL-0037,72,Prefer not to say,2025-08-24,0,110.94,Lauren Hemp,App,Member,N1
+WSL-0038,40,Prefer not to say,2026-09-11,15,554.92,Chloe Kelly,App,Member,E1
+WSL-0039,17,Female,2024-12-14,1,78.51,Rachel Daly,App,Lapsed,LS1
+WSL-0040,59,Non-binary,2025-04-19,2,193.75,Beth Mead,Post,General Admission,M2
+WSL-0041,22,Prefer not to say,2025-02-17,3,216.45,Vivianne Miedema,Social,Lapsed,SW1
+WSL-0042,32,Male,2026-09-05,13,268.89,Chloe Kelly,Social,Season Ticket,B1
+WSL-0043,55,Non-binary,2025-12-03,3,251.26,Millie Bright,App,Hospitality,EC1
+WSL-0044,51,Male,2026-06-12,6,394.23,Rachel Daly,Social,Lapsed,M1
+WSL-0045,35,Non-binary,2025-12-31,6,355.68,Erin Cuthbert,Social,Hospitality,SW1
+WSL-0046,48,Non-binary,2025-06-23,1,100.74,Vivianne Miedema,SMS,General Admission,E1
+WSL-0047,67,Prefer not to say,2026-03-31,4,85.49,Vivianne Miedema,Social,Hospitality,EH1
+WSL-0048,28,Female,2024-11-06,3,188.38,Vivianne Miedema,Social,Member,SE1
+WSL-0049,67,Female,2024-11-07,3,78.41,Erin Cuthbert,SMS,Hospitality,BS1
+WSL-0050,51,Prefer not to say,2025-02-18,2,288.68,Erin Cuthbert,SMS,Hospitality,L1
+WSL-0051,32,Male,2026-02-09,8,667.06,Rachel Daly,Social,Season Ticket,EC1
+WSL-0052,31,Male,2026-01-15,10,450.18,Beth Mead,SMS,Hospitality,N2
+WSL-0053,61,Prefer not to say,2026-03-15,2,132.57,Millie Bright,Email,Member,LS2
+WSL-0054,40,Prefer not to say,2025-03-01,0,91.87,Erin Cuthbert,Email,General Admission,EC1
+WSL-0055,64,Male,2025-09-16,3,258.17,Erin Cuthbert,SMS,General Admission,LS2
+WSL-0056,47,Prefer not to say,2026-09-21,12,560.28,Beth Mead,Social,Member,CF1
+WSL-0057,17,Prefer not to say,2025-09-12,0,51.43,Beth Mead,Email,General Admission,LS1
+WSL-0058,36,Prefer not to say,2026-03-18,14,639.14,Rachel Daly,Social,General Admission,M3
+WSL-0059,46,Male,2026-10-01,17,391.72,Vivianne Miedema,Email,Season Ticket,E1
+WSL-0060,28,Female,2026-09-30,4,184.02,Lauren Hemp,Social,General Admission,B2
+WSL-0061,26,Non-binary,2025-02-07,0,19.65,Vivianne Miedema,Post,Season Ticket,EC1
+WSL-0062,52,Female,2024-11-26,3,220.57,Lauren Hemp,Email,General Admission,N1
+WSL-0063,66,Non-binary,2025-03-20,0,51.41,Vivianne Miedema,Post,General Admission,M1
+WSL-0064,70,Prefer not to say,2025-08-16,3,177.57,Beth Mead,Social,Member,BS1
+WSL-0065,57,Non-binary,2026-01-17,17,1352.8,Chloe Kelly,SMS,Season Ticket,W1
+WSL-0066,72,Prefer not to say,2025-07-16,1,142.67,Chloe Kelly,Email,Hospitality,B1
+WSL-0067,27,Non-binary,2025-06-08,1,72.45,Rachel Daly,Post,Season Ticket,BS1
+WSL-0068,28,Male,2026-07-25,7,560.99,Erin Cuthbert,Social,Hospitality,M1
+WSL-0069,21,Non-binary,2025-12-23,7,348.15,Erin Cuthbert,Post,Lapsed,B2
+WSL-0070,43,Non-binary,2025-04-05,2,136.85,Rachel Daly,SMS,Season Ticket,SW1
+WSL-0071,36,Male,2026-06-20,17,1628.51,Lauren Hemp,Social,General Admission,EH1
+WSL-0072,64,Non-binary,2025-05-01,2,286.68,Lauren Hemp,App,Member,EC1
+WSL-0073,16,Non-binary,2024-10-25,1,151.68,Beth Mead,Social,Season Ticket,M1
+WSL-0074,52,Female,2026-01-02,15,816.88,Rachel Daly,Social,Season Ticket,M3
+WSL-0075,41,Male,2025-06-04,0,82.37,Beth Mead,Post,General Admission,M3
+WSL-0076,31,Male,2026-06-21,17,1355.39,Millie Bright,Social,Hospitality,EC1
+WSL-0077,71,Female,2025-02-25,3,186.56,Lauren Hemp,SMS,General Admission,M3
+WSL-0078,26,Prefer not to say,2026-02-17,5,307.86,Erin Cuthbert,Post,Hospitality,EC1
+WSL-0079,18,Prefer not to say,2026-02-25,9,720.45,Vivianne Miedema,SMS,General Admission,EH1
+WSL-0080,58,Male,2026-04-01,13,306.82,Rachel Daly,SMS,Season Ticket,M2
+WSL-0081,26,Prefer not to say,2025-12-10,18,1644.96,Rachel Daly,Social,General Admission,BS1
+WSL-0082,50,Prefer not to say,2025-06-02,3,60.81,Chloe Kelly,Post,General Admission,M1
+WSL-0083,21,Non-binary,2026-02-28,18,1095.65,Sam Kerr,SMS,Hospitality,BS1
+WSL-0084,57,Prefer not to say,2025-07-25,2,124.37,Vivianne Miedema,Social,General Admission,LS2
+WSL-0085,37,Prefer not to say,2025-11-26,3,289.15,Rachel Daly,Social,Lapsed,M2
+WSL-0086,45,Prefer not to say,2026-07-22,10,343.4,Sam Kerr,Post,Hospitality,LS2
+WSL-0087,19,Prefer not to say,2026-04-11,16,763.22,Sam Kerr,SMS,General Admission,CF1
+WSL-0088,24,Female,2025-12-30,14,1249.71,Lauren Hemp,SMS,General Admission,CF1
+WSL-0089,16,Female,2025-04-03,3,178.28,Erin Cuthbert,Email,Member,L2
+WSL-0090,61,Prefer not to say,2025-12-26,16,1178.65,Erin Cuthbert,SMS,Hospitality,CF1
+WSL-0091,25,Male,2025-09-23,1,149.5,Vivianne Miedema,App,Hospitality,B1
+WSL-0092,66,Non-binary,2025-05-19,2,194.15,Erin Cuthbert,SMS,Hospitality,CF1
+WSL-0093,46,Prefer not to say,2025-11-01,10,643.3,Chloe Kelly,SMS,Member,EH1
+WSL-0094,40,Prefer not to say,2026-02-23,13,292.46,Millie Bright,SMS,Hospitality,M2
+WSL-0095,24,Prefer not to say,2025-05-24,2,273.27,Vivianne Miedema,Post,Hospitality,M1
+WSL-0096,62,Female,2026-05-26,13,1212.13,Erin Cuthbert,App,General Admission,LS1
+WSL-0097,57,Prefer not to say,2026-07-30,10,930.56,Chloe Kelly,Social,Lapsed,M2
+WSL-0098,55,Male,2026-08-11,7,561.22,Vivianne Miedema,Social,Season Ticket,N1
+WSL-0099,44,Female,2026-05-03,9,788.38,Rachel Daly,App,General Admission,LS2
+WSL-0100,25,Male,2026-02-12,16,821.02,Beth Mead,SMS,Season Ticket,LS1
+WSL-0101,55,Male,2024-11-20,1,123.29,Erin Cuthbert,App,Hospitality,W1
+WSL-0102,58,Male,2026-10-11,14,1296.52,Vivianne Miedema,Social,General Admission,EH1
+WSL-0103,35,Non-binary,2025-01-04,3,262.71,Lauren Hemp,Social,Hospitality,N1
+WSL-0104,31,Non-binary,2025-09-25,2,238.54,Sam Kerr,Social,General Admission,M1
+WSL-0105,52,Non-binary,2024-11-17,0,89.42,Lauren Hemp,Post,General Admission,E1
+WSL-0106,56,Male,2026-04-09,8,632.55,Vivianne Miedema,Email,General Admission,L1
+WSL-0107,18,Non-binary,2025-03-06,2,156.39,Chloe Kelly,Social,Member,SW1
+WSL-0108,24,Male,2025-04-16,2,221.74,Rachel Daly,Social,General Admission,B1
+WSL-0109,67,Male,2026-06-25,14,1303.77,Millie Bright,Post,General Admission,M3
+WSL-0110,66,Non-binary,2025-09-11,0,14.83,Rachel Daly,Post,Hospitality,B2
+WSL-0111,22,Non-binary,2024-11-28,1,125.48,Lauren Hemp,Email,Hospitality,EC1
+WSL-0112,57,Non-binary,2025-08-28,0,113.55,Erin Cuthbert,Email,Season Ticket,E1
+WSL-0113,72,Prefer not to say,2025-04-18,1,88.78,Beth Mead,Social,Season Ticket,L2
+WSL-0114,55,Prefer not to say,2025-08-29,2,73.89,Erin Cuthbert,SMS,General Admission,N1
+WSL-0115,59,Female,2025-10-09,2,67.16,Erin Cuthbert,Email,Member,M1
+WSL-0116,19,Male,2025-11-13,7,752.94,Vivianne Miedema,Post,Member,EH1
+WSL-0117,29,Female,2026-02-24,10,857.36,Rachel Daly,SMS,Member,CF1
+WSL-0118,32,Female,2026-04-25,3,203.7,Chloe Kelly,SMS,Lapsed,B1
+WSL-0119,17,Female,2026-04-25,8,219.8,Vivianne Miedema,Social,Hospitality,B2
+WSL-0120,48,Female,2025-02-20,0,26.59,Rachel Daly,Social,Season Ticket,M2
+WSL-0121,46,Prefer not to say,2025-09-04,3,265.67,Vivianne Miedema,Email,General Admission,N2
+WSL-0122,20,Non-binary,2026-06-13,8,580.79,Millie Bright,Post,Lapsed,EC1
+WSL-0123,45,Male,2025-05-21,3,144.91,Millie Bright,Social,Member,LS2
+WSL-0124,37,Prefer not to say,2025-07-13,3,150.99,Chloe Kelly,App,General Admission,N2
+WSL-0125,59,Prefer not to say,2025-06-22,0,10.24,Vivianne Miedema,App,Member,CF1
+WSL-0126,19,Prefer not to say,2025-02-27,2,184.52,Sam Kerr,App,Lapsed,EC1
+WSL-0127,38,Prefer not to say,2026-07-06,18,992.64,Lauren Hemp,Email,General Admission,CF1
+WSL-0128,39,Female,2026-06-25,8,574.07,Rachel Daly,Email,Member,W1
+WSL-0129,60,Male,2025-12-08,10,433.12,Millie Bright,Email,Member,M1
+WSL-0130,21,Male,2025-04-25,1,97.66,Chloe Kelly,App,General Admission,EH1
+WSL-0131,54,Female,2026-07-26,1,115.45,Vivianne Miedema,App,Hospitality,LS2
+WSL-0132,47,Female,2025-02-06,3,165.0,Chloe Kelly,Social,Season Ticket,EC1
+WSL-0133,59,Male,2024-11-25,3,204.22,Millie Bright,Post,Season Ticket,M1
+WSL-0134,29,Non-binary,2025-12-16,6,545.84,Chloe Kelly,Email,Season Ticket,L2
+WSL-0135,63,Male,2025-08-06,1,86.63,Chloe Kelly,Email,Hospitality,M2
+WSL-0136,43,Prefer not to say,2026-10-01,14,1341.84,Millie Bright,Social,General Admission,N1
+WSL-0137,41,Prefer not to say,2026-09-29,10,376.37,Chloe Kelly,Email,Hospitality,N1
+WSL-0138,31,Non-binary,2025-07-31,3,213.96,Chloe Kelly,SMS,General Admission,SE1
+WSL-0139,20,Non-binary,2025-05-16,0,23.27,Chloe Kelly,SMS,Member,N1
+WSL-0140,25,Female,2026-01-31,6,176.75,Beth Mead,Social,Hospitality,EH1
+WSL-0141,64,Non-binary,2025-03-06,3,311.45,Chloe Kelly,SMS,Hospitality,M3
+WSL-0142,46,Non-binary,2025-07-25,2,227.16,Vivianne Miedema,App,Hospitality,L1
+WSL-0143,18,Female,2026-08-23,11,900.55,Millie Bright,Social,Lapsed,CF1
+WSL-0144,66,Male,2026-09-08,14,1292.91,Chloe Kelly,Post,Hospitality,BS1
+WSL-0145,25,Non-binary,2026-08-18,14,396.16,Vivianne Miedema,Post,Member,M2
+WSL-0146,31,Male,2024-10-26,3,345.64,Chloe Kelly,App,General Admission,LS1
+WSL-0147,42,Female,2025-11-08,1,155.18,Chloe Kelly,Email,Lapsed,LS1
+WSL-0148,34,Male,2026-02-04,4,228.6,Chloe Kelly,App,Hospitality,N2
+WSL-0149,54,Non-binary,2024-10-25,0,45.2,Beth Mead,Post,Season Ticket,LS2
+WSL-0150,48,Male,2025-10-15,0,21.63,Chloe Kelly,Social,Member,E1
+WSL-0151,24,Female,2026-05-15,2,167.68,Chloe Kelly,Post,Member,LS1
+WSL-0152,25,Male,2026-05-07,5,497.54,Erin Cuthbert,Email,Hospitality,B2
+WSL-0153,59,Prefer not to say,2026-02-19,14,967.8,Lauren Hemp,Post,Member,EC1
+WSL-0154,67,Prefer not to say,2025-06-27,1,156.19,Erin Cuthbert,App,Hospitality,BS1
+WSL-0155,49,Male,2025-08-18,1,175.95,Rachel Daly,Email,Hospitality,B2
+WSL-0156,51,Male,2026-07-07,16,1356.56,Rachel Daly,Social,Lapsed,N2
+WSL-0157,69,Prefer not to say,2025-07-30,0,26.64,Chloe Kelly,Email,Hospitality,M2
+WSL-0158,41,Non-binary,2025-05-24,2,182.48,Lauren Hemp,Email,General Admission,N1
+WSL-0159,69,Non-binary,2024-12-24,2,171.88,Erin Cuthbert,SMS,Hospitality,L1
+WSL-0160,55,Male,2026-10-15,2,53.03,Millie Bright,Email,General Admission,E1
+WSL-0161,35,Prefer not to say,2026-06-18,1,108.46,Vivianne Miedema,Email,Hospitality,CF1
+WSL-0162,17,Female,2025-01-11,1,106.59,Chloe Kelly,SMS,Lapsed,LS2
+WSL-0163,27,Female,2024-12-09,0,43.27,Millie Bright,Social,Season Ticket,LS1
+WSL-0164,39,Male,2026-02-03,0,8.11,Vivianne Miedema,Post,General Admission,N2
+WSL-0165,18,Prefer not to say,2025-10-25,17,758.83,Erin Cuthbert,SMS,Member,M3
+WSL-0166,61,Male,2025-07-09,0,5.26,Sam Kerr,App,General Admission,BS1
+WSL-0167,41,Male,2025-04-12,3,189.47,Rachel Daly,App,Season Ticket,B1
+WSL-0168,33,Prefer not to say,2026-06-15,11,578.94,Millie Bright,App,Member,L2
+WSL-0169,60,Female,2025-05-29,2,239.75,Millie Bright,Email,Hospitality,SE1
+WSL-0170,50,Non-binary,2025-12-24,10,244.51,Rachel Daly,Social,Lapsed,LS2
+WSL-0171,26,Non-binary,2024-11-13,3,128.62,Millie Bright,App,Season Ticket,M3
+WSL-0172,58,Male,2025-01-06,3,222.6,Sam Kerr,SMS,Lapsed,L1
+WSL-0173,18,Non-binary,2026-06-13,2,140.59,Millie Bright,Post,Season Ticket,N2
+WSL-0174,59,Male,2025-07-17,2,177.32,Chloe Kelly,Social,General Admission,W1
+WSL-0175,31,Prefer not to say,2026-06-26,0,59.89,Vivianne Miedema,App,General Admission,L1
+WSL-0176,29,Male,2025-02-01,2,259.04,Vivianne Miedema,SMS,Season Ticket,L1
+WSL-0177,27,Non-binary,2024-10-20,3,381.58,Chloe Kelly,Email,Lapsed,CF1
+WSL-0178,34,Male,2025-12-17,5,466.68,Chloe Kelly,Post,Member,N1
+WSL-0179,28,Non-binary,2026-05-31,7,546.36,Erin Cuthbert,Post,Member,M3
+WSL-0180,20,Prefer not to say,2025-12-08,12,1225.86,Millie Bright,Post,Season Ticket,N2
+WSL-0181,36,Non-binary,2025-01-01,0,81.61,Beth Mead,Post,Lapsed,SE1
+WSL-0182,65,Female,2026-06-10,13,802.78,Beth Mead,App,Member,SE1
+WSL-0183,36,Non-binary,2024-10-24,1,153.63,Vivianne Miedema,App,Member,CF1
+WSL-0184,33,Male,2026-06-14,9,578.19,Beth Mead,SMS,Lapsed,B1
+WSL-0185,69,Female,2025-03-22,0,3.4,Rachel Daly,SMS,Lapsed,LS2
+WSL-0186,55,Non-binary,2025-01-04,0,75.26,Rachel Daly,Social,Member,LS1
+WSL-0187,35,Prefer not to say,2025-07-13,0,18.97,Erin Cuthbert,Social,Member,B1
+WSL-0188,54,Non-binary,2026-05-26,10,873.35,Millie Bright,SMS,General Admission,BS1
+WSL-0189,51,Prefer not to say,2026-07-04,10,335.35,Lauren Hemp,SMS,Season Ticket,M2
+WSL-0190,34,Male,2025-09-22,3,201.66,Chloe Kelly,Post,General Admission,SW1
+WSL-0191,64,Non-binary,2026-05-10,15,1476.0,Erin Cuthbert,Email,Season Ticket,LS1
+WSL-0192,48,Female,2025-07-09,1,72.2,Rachel Daly,Social,Lapsed,L2
+WSL-0193,34,Non-binary,2025-04-19,0,51.71,Chloe Kelly,Social,General Admission,M2
+WSL-0194,41,Non-binary,2026-08-29,18,1098.86,Vivianne Miedema,Social,Lapsed,L1
+WSL-0195,64,Female,2025-04-05,2,235.79,Beth Mead,Email,Hospitality,B2
+WSL-0196,66,Male,2025-11-07,17,1619.45,Millie Bright,Post,Season Ticket,M2
+WSL-0197,18,Male,2026-06-02,10,849.61,Beth Mead,App,Lapsed,B1
+WSL-0198,26,Prefer not to say,2025-09-13,2,183.44,Rachel Daly,Social,Season Ticket,B2
+WSL-0199,37,Female,2024-11-30,0,70.04,Erin Cuthbert,App,Lapsed,EH1
+WSL-0200,30,Prefer not to say,2026-08-29,18,996.7,Beth Mead,SMS,Season Ticket,EH1`;
+const SAMPLE_DAY = [2026, 10, 21];
+const $ = id => document.getElementById(id);
+const SAMPLE = (() => {
+  const p = Papa.parse(SAMPLE_CSV.trim(), { header: true, skipEmptyLines: true });
+  const d = new Date(), today = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()), shift = today - Date.UTC(SAMPLE_DAY[0], SAMPLE_DAY[1] - 1, SAMPLE_DAY[2]);
+  p.data.forEach(r => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(r.Last_Attended || ""); if (m) r.Last_Attended = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]) + shift).toISOString().slice(0, 10); });
+  return { headers: p.meta.fields, rows: p.data };
+})();
+const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const fmt = n => FanIntel.pyRound(n).toLocaleString("en-GB");
+const gbp = n => "£" + fmt(n);
+const r0 = v => FanIntel.pyRound(v);
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+const CORE = FanIntel.CORE_COLUMNS;
+const BRAND = "#6D28D9", GOOD = "#5A7A00", BLUE = "#2F6FDB", RED = "#C93A3A", AMBER = "#B7791F", GREY = "#9AA5B8", PURPLE = "#7A5AF8";
+
+/* ================= upload ================= */
+const tick = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function renderCols(map) {
+  $("colList").innerHTML = Object.entries(FanIntel.COLUMN_INFO).map(([key, unlocks]) => {
+    const m = map ? map[key] : null, cls = map ? (m ? "hit" : "miss") : "";
+    return `<div class="col ${cls}"><div class="dot">${tick}</div><div>
+      <b>${key}${CORE.includes(key) ? '<em>Core</em>' : ''}</b><span>${unlocks}</span>
+      ${m && m !== key ? `<span class="as">Matched to your column "${esc(m)}"</span>` : ''}</div></div>`;
+  }).join("");
+}
+const drop = $("drop"), input = $("file");
+drop.addEventListener("click", () => input.click());
+drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) handle(f); });
+input.addEventListener("change", () => { if (input.files[0]) handle(input.files[0]); });
+$("change").addEventListener("click", () => { clearTimeout(autoT); input.value = ""; input.click(); });
+
+function handle(file) {
+  if (!/\.csv$/i.test(file.name) && file.type !== "text/csv") return showError("That file isn't a CSV. Export your CRM as .csv and try again.");
+  if (file.size > 200 * 1024 * 1024) return showError("That file is over 200 MB. Split it or remove unused columns, then try again.");
+  if (!window.Papa) return showError("The CSV reader didn't load. Check your connection and refresh the page.");
+  Papa.parse(file, { header: true, skipEmptyLines: true,
+    complete: res => show(file.name, file.size, res.meta.fields || [], res.data),
+    error: () => showError("FanIntel couldn't read that file. Check it opens in Excel, then try again.") });
+}
+function showError(text) {
+  const m = $("msg"); m.className = "msg on"; m.textContent = text;
+  if (!$("summary").classList.contains("on")) { $("summary").classList.add("on"); drop.hidden = true; $("table").innerHTML = ""; $("score").disabled = true; }
+}
+let current = null, autoT = 0, scoring = false;
+function show(name, size, headers, rows) {
+  current = { name, headers, rows };
+  drop.hidden = true; $("actions").hidden = true;
+  const s = $("summary"); s.classList.remove("on"); void s.offsetWidth; s.classList.add("on");
+  $("fname").textContent = name;
+  $("fsize").textContent = size ? (size / 1048576 < 1 ? Math.max(1, Math.round(size / 1024)) + " KB" : (size / 1048576).toFixed(1) + " MB") : `Sample data, ${rows.length} fans`;
+  const map = FanIntel.detectColumns(headers), hits = Object.keys(map).length;
+  current.map = map;
+  countUp($("rows"), rows.length); countUp($("cols"), headers.length);
+  $("feat").textContent = hits + "/" + Object.keys(FanIntel.COLUMN_INFO).length;
+  const mapped = new Set(Object.values(map)), head = headers.slice(0, 12);
+  $("table").innerHTML = "<thead><tr>" + head.map(h => `<th class="${mapped.has(h) ? "hit" : ""}">${esc(h)}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.slice(0, 5).map(r => "<tr>" + head.map(h => `<td>${esc(r[h] ?? "")}</td>`).join("") + "</tr>").join("") + "</tbody>";
+  $("goNote").textContent = headers.length > 12 ? `Showing 5 rows and the first 12 of ${headers.length} columns.` : "Preview shows the first 5 rows.";
+  renderCols(map);
+  const behaviour = ["Last_Attended", "Tickets_Purchased", "Spend"].filter(c => map[c]), m = $("msg");
+  if (!rows.length) { m.className = "msg on"; m.textContent = "That file has headers but no fans in it."; $("score").disabled = true; }
+  else if (!behaviour.length || hits < 2) {
+    m.className = "msg on"; m.textContent = `FanIntel needs at least one behaviour column to score fans: Last_Attended, Tickets_Purchased or Spend. Rename the matching column in your file, or add one, then upload again.`;
+    $("score").disabled = true;
+  } else { m.className = "msg"; $("score").disabled = false; clearTimeout(autoT); autoT = setTimeout(() => { if (!$("viewUpload").hidden && current && current.rows === rows) $("score").click(); }, reduce ? 0 : 900); }
+  $("s1").className = "done"; $("s2").className = "on"; $("s3").className = "";
+}
+function countUp(el, to, d = 900, f = fmt) {
+  if (reduce) { el.textContent = f(to); return; }
+  const t0 = performance.now();
+  (function step(now) { const e = Math.min(1, (now - t0) / d); el.textContent = f(to * (1 - Math.pow(1 - e, 3))); if (e < 1) requestAnimationFrame(step); })(t0);
+}
+$("sample").addEventListener("click", () => show("wsl_sample_fans.csv", 0, SAMPLE.headers, SAMPLE.rows.map(r => ({ ...r }))));
+$("copy").addEventListener("click", async () => {
+  const text = Object.keys(FanIntel.COLUMN_INFO).join(",");
+  try { await navigator.clipboard.writeText(text); $("copy").textContent = "Copied"; } catch (e) { $("copy").textContent = text; }
+  setTimeout(() => $("copy").textContent = "Copy column headers", 2200);
+});
+renderCols(null);
+
+/* ================= analyse ================= */
+$("score").addEventListener("click", async () => {
+  if (scoring) return; scoring = true; clearTimeout(autoT);
+  const ov = $("analysing"), li = [...$("aSteps").children];
+  li.forEach(l => l.classList.remove("on")); ov.hidden = false;
+  const wait = ms => new Promise(r => setTimeout(r, reduce ? 0 : ms));
+  await wait(150); li[0].classList.add("on");
+  await wait(350);
+  const result = FanIntel.run(current.headers, current.rows);
+  li[1].classList.add("on"); await wait(380); li[2].classList.add("on"); await wait(380); li[3].classList.add("on"); await wait(380);
+  ov.hidden = true; scoring = false;
+  if (result.enough && window.THREE) Landing.start(result, current.name, () => showResults(result)); else showResults(result);
+});
+$("newUpload").addEventListener("click", () => {
+  $("viewResults").hidden = true; $("viewUpload").hidden = false; stopViz();
+  $("summary").classList.remove("on"); drop.hidden = false; $("actions").hidden = false; input.value = ""; renderCols(null);
+  $("s1").className = "on"; $("s2").className = ""; $("s3").className = ""; scrollTo(0, 0);
+});
+$("home").addEventListener("click", e => { e.preventDefault(); if (Landing.alive) Landing.stop(); if (!$("viewResults").hidden) $("newUpload").click(); });
+const App = {
+  upload() { if (!$("viewResults").hidden) $("newUpload").click(); scrollTo(0, 0); },
+  demo() { $("newUpload").click(); $("sample").click(); }
+};
+
+/* ================= shared bits ================= */
+const pill = (t, c) => `<span class="pill ${c}">${esc(t)}</span>`;
+const SRC = { data: ["Your data", "blue"], fi: ["FanIntel", "violet"], model: ["Modelled", "amber"] };
+const src = k => `<span class="src ${SRC[k][1]}">${SRC[k][0]}</span>`;
+const LVL = { HIGH: "red", MED: "amber", LOW: "green", OPT: "blue" };
+const LVL_HEX = { HIGH: RED, MED: AMBER, LOW: GOOD, OPT: BLUE };
+const head = (title, source, sub) => `<div class="shead"><h3>${title}</h3>${source ? src(source) : ""}</div>${sub ? `<p class="sub">${sub}</p>` : ""}`;
+const gate = (feature, cols) => `<div class="gate"><b>${feature} is locked</b><span>Add ${cols.map(c => `<code>${c}</code>`).join(" and ")} to your file to unlock it.</span></div>`;
+function hbars(rows, opts = {}) { // rows: [label, value, color, display]
+  const max = opts.max || Math.max(1, ...rows.map(r => r[1]));
+  return `<div class="hbars">${rows.map((r, i) => `<div class="r"><span>${esc(r[0])}</span><span class="t"><i style="width:${Math.max(1.5, r[1] / max * 100)}%;background:${r[2]};animation-delay:${i * .06}s"></i></span><b>${r[3] ?? fmt(r[1])}</b></div>`).join("")}</div>`;
+}
+function gauge(v, color, label) {
+  const a = Math.PI * (1 - v / 100), x = 60 + 50 * Math.cos(a), y = 60 - 50 * Math.sin(a);
+  return `<svg viewBox="0 0 120 74" class="gauge-svg" role="img" aria-label="${label} ${v} out of 100"><path d="M 10 60 A 50 50 0 0 1 110 60" fill="none" stroke="rgba(14,26,46,.08)" stroke-width="11" stroke-linecap="round"/>
+    <path d="M 10 60 A 50 50 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)}" fill="none" stroke="${color}" stroke-width="11" stroke-linecap="round" class="garc"/>
+    <text x="60" y="56" text-anchor="middle" font-size="27" font-weight="850" fill="${color}">${v}</text><text x="60" y="71" text-anchor="middle" font-size="9" fill="#4E5B72">out of 100</text></svg>`;
+}
+function donut(parts, colors, centre, sub) {
+  const tot = parts.reduce((a, p) => a + p[1], 0) || 1, R = 70, C = 2 * Math.PI * R; let off = 0;
+  return `<svg viewBox="0 0 190 190" class="donut-svg" role="img" aria-label="${esc(sub)} breakdown"><g transform="translate(95 95) rotate(-90)">
+    ${parts.map(([k, v], i) => { const len = v / tot * C, seg = `<circle r="${R}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="26" stroke-dasharray="${Math.max(0, len - 2)} ${C}" stroke-dashoffset="${-off}"/>`; off += len; return seg; }).join("")}
+  </g><text x="95" y="93" text-anchor="middle" font-size="24" font-weight="850" fill="#0E1A2E">${centre}</text><text x="95" y="112" text-anchor="middle" font-size="11" fill="#4E5B72">${sub}</text></svg>`;
+}
+function toast(t) { const el = document.createElement("div"); el.textContent = t; el.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0E1A2E;color:#fff;padding:10px 16px;border-radius:999px;font-size:.88rem;z-index:30"; document.body.appendChild(el); setTimeout(() => el.remove(), 2600); }
+async function saveFile(filename, blob) {
+  try {
+    if (window.claude && claude.use) {
+      const dl = await claude.use("downloads");
+      if (dl) { try { await dl.save({ filename, data: blob }); } catch (e) { if (e && e.code !== "declined") toast("Couldn't save the file here. Try again in a moment."); } return; }
+    }
+  } catch (e) {}
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const csvCell = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const toCsv = (hdr, rows) => [hdr, ...rows].map(r => r.map(csvCell).join(",")).join("\n");
+
+/* ================= results routing ================= */
+let LAST = null;
+document.querySelectorAll(".tab[data-tab]").forEach(b => b.addEventListener("click", () => openTab(b.dataset.tab)));
+const RENDER = { overview: renderOverview, fans: renderFans, sponsor: renderSponsor, matchday: renderMatchday, acquisition: renderAcquisition, welfare: renderWelfare };
+function openTab(name) {
+  if (!LAST) return;
+  document.querySelectorAll(".tab[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  stopViz();
+  (RENDER[name] || renderOverview)(LAST);
+  bindTilt();
+}
+function showResults(R) {
+  LAST = R;
+  $("viewUpload").hidden = true; $("viewResults").hidden = false;
+  $("s2").className = "done"; $("s3").className = "on"; scrollTo(0, 0);
+  $("rmeta").innerHTML = `<b>${fmt(R.D.n)} fans</b> from ${esc(current.name)}<br>Mapped: ${Object.keys(R.cm).map(esc).join(", ")}`;
+  openTab("overview");
+}
+
+/* ================= Overview ================= */
+const scoreHex = v => v >= 70 ? GOOD : v >= 50 ? AMBER : RED;
+const ENG_BANDS = [["Strong, 65+", GOOD, e => e >= 65], ["Moderate, 30 to 64", BLUE, e => e >= 30 && e < 65], ["Low, under 30", GREY, e => e < 30]];
+function renderOverview(R) {
+  const out = $("outlook"), k = R.kpis, S = R.score, sc = scoreHex(S.value);
+  const engCounts = ENG_BANDS.map(b => R.D.eng.filter(e => !isNaN(e) && b[2](e)).length), engTot = engCounts.reduce((a, b) => a + b, 0) || 1;
+  const sentDelta = k.sentiment_score - 65, dem = r0(k.demand_index * 100);
+  const demLabel = dem >= 75 ? "Strong" : dem >= 58 ? "Average" : "Below target";
+  const peak = R.exposure.fixtures.reduce((a, b) => b.sponsor_index > a.sponsor_index ? b : a);
+  const best = R.signals.find(s => s.priority === "HIGH") || R.signals[0];
+  const riskHex = k.overall_risk >= 60 ? RED : k.overall_risk >= 35 ? AMBER : GOOD;
+  out.innerHTML = `
+  <section class="hero">
+    <div>
+      <div class="kicker"><i></i>Your fanbase today</div>
+      <p class="headline">Your fanbase scores <em>${S.value} out of 100</em> on FanIntel: ${S.label.charAt(0).toLowerCase() + S.label.slice(1)}.</p>
+      <div class="panel fcrs tilt">
+        <div class="lbl">FanIntel Score, built from five signals</div>
+        <div class="top"><div class="big" id="fiScore" style="color:${sc}">${S.value}</div><div class="pills">${pill(S.value >= 70 ? "Healthy" : S.value >= 50 ? "Moderate" : "At risk", S.value >= 70 ? "green" : S.value >= 50 ? "amber" : "red")}</div></div>
+        <div class="comps">${S.comps.map(([nm, contrib, w, val]) => `<div class="comp"><div class="row"><span>${nm}</span><b>${r0(val)}<small> · ${r0(w * 100)}%</small></b></div><div class="track"><i style="width:${Math.max(2, Math.min(100, val))}%"></i></div></div>`).join("")}</div>
+        <div class="note">70 and above is healthy. Each signal is scored 0 to 100, then weighted.</div>
+      </div>
+    </div>
+    <div class="panel viz tilt" id="viz">
+      <div class="title"><i></i>Your fans by engagement</div>
+      <canvas id="vizc" aria-hidden="true"></canvas>
+      <div class="vlegend">${ENG_BANDS.map((b, i) => `<span><i style="background:${b[1]}"></i>${b[0]}: <b>${fmt(engCounts[i])}</b> (${r0(engCounts[i] / engTot * 100)}%)</span>`).join("")}</div>
+    </div>
+  </section>
+
+  <section class="panel sec">
+    ${head("Commercial impact, signal by signal", null, "How your data flows into the one action that matters most this week.")}
+    <div class="cascade">
+      <div class="node" style="--c:${sentDelta >= 0 ? GOOD : RED}"><span>Engagement</span><b>${k.sentiment_score}/100</b><small>${sentDelta >= 0 ? "+" : ""}${sentDelta} vs WSL average of 65</small>${src("fi")}</div>
+      <div class="arrow" aria-hidden="true"></div>
+      <div class="node" style="--c:${dem >= 75 ? GOOD : dem >= 58 ? AMBER : RED}"><span>Ticket demand</span><b>${dem}%</b><small>${demLabel}, share of fans who have bought</small>${src("data")}</div>
+      <div class="arrow" aria-hidden="true"></div>
+      <div class="node" style="--c:${peak.sponsor_index >= 70 ? GOOD : peak.sponsor_index >= 50 ? BLUE : GREY}"><span>Sponsor exposure</span><b>${peak.sponsor_index}</b><small>Peak index, ${esc(peak.opponent.toLowerCase())}</small>${src("model")}</div>
+      <div class="arrow" aria-hidden="true"></div>
+      <div class="node act"><span>Action</span><b class="t">${esc(best ? best.action : "Review fan intelligence data")}</b><small>${esc(best ? best.title : "")}</small></div>
+    </div>
+  </section>
+
+  <section class="kpis four">
+    <div class="panel kpi tilt"><b style="color:${BRAND}">${k.sentiment_score}</b><div class="l">Fan engagement score</div><div class="s">0 to 100, above 65 is strong</div></div>
+    <div class="panel kpi tilt"><b>${k.demand_index.toFixed(2)}</b><div class="l">Ticket demand index</div><div class="s">0 to 1, share of fans who have bought</div></div>
+    <div class="panel kpi tilt"><b style="color:${riskHex}">${k.overall_risk}</b><div class="l">Fan risk score</div><div class="s">0 to 100, lower is better</div></div>
+    <div class="panel kpi tilt"><b>${fmt(R.D.n)}</b><div class="l">Fans in your database</div><div class="s">${R.avgSpend != null ? gbp(R.avgSpend) + " average spend" : Object.keys(R.cm).length + " columns matched"}</div></div>
+  </section>
+
+  <section class="panel sec">
+    ${head("Fan intelligence signals", null, "What FanIntel spotted in your file, most urgent first.")}
+    <div class="signals">${R.signals.map(s => `<article class="signal" style="--c:${LVL_HEX[s.priority]}">
+      <div class="st">${pill(s.priority === "OPT" ? "Opportunity" : s.priority === "HIGH" ? "High priority" : "Medium priority", LVL[s.priority])}${src(s.source === "From your data" ? "data" : s.source === "FanIntel" ? "fi" : "model")}</div>
+      <h4>${esc(s.title)}</h4><p>${esc(s.desc)}</p><div class="do">${esc(s.action)}</div></article>`).join("")}</div>
+  </section>`;
+  countUp($("fiScore"), S.value, 1100, v => r0(v));
+  startViz(R);
+}
+
+/* ================= Fans & Players ================= */
+function renderFans(R) {
+  const out = $("outlook"), f = R.features;
+  const cohortHtml = !R.cohorts.length ? gate("Fan cohort breakdown", ["Age"]) : `<div class="cohorts">${R.cohorts.map(c => {
+    const h = c.risk_score >= 65 ? RED : c.risk_score >= 40 ? AMBER : GOOD;
+    return `<article class="panel cohort tilt" style="--acc:${h}"><div class="nm">${esc(c.name)}</div>
+      <div class="rs" style="color:${h}">${c.risk_score}<small>risk</small></div>
+      <div class="track"><i style="width:${c.risk_score}%;background:${h}"></i></div>
+      <div class="meta">${c.size_pct}% of fanbase · ${fmt(c.count)} fans<br>Engagement ${c.engagement}/100</div>
+      <div class="rec"><span>Channel</span>${esc(c.channel)}<span>When</span>${esc(c.timing)}<span>Trigger</span>${esc(c.trigger)}<span>Offer</span><em>${esc(c.offer)}</em></div></article>`; }).join("")}</div>`;
+  const churnHtml = !R.churn.length ? gate("Churn risk", ["Last_Attended"]) : `<div class="churn">${R.churn.map((c, i) => `<div class="cr"><div class="nm">${esc(c.name)}</div>
+    <div class="t"><i style="width:${c.churn_pct}%;background:${LVL_HEX[c.risk_level]};animation-delay:${i * .06}s"></i></div>
+    <b style="color:${LVL_HEX[c.risk_level]}">${c.churn_pct}%</b>${pill(c.risk_level === "MED" ? "Medium" : c.risk_level.charAt(0) + c.risk_level.slice(1).toLowerCase(), LVL[c.risk_level])}<p>${esc(c.retention_action)}</p></div>`).join("")}</div>`;
+  const P = R.players;
+  const playerHtml = !f.player_intelligence ? gate("Player intelligence", ["Favourite_Player"]) : !P.length ? `<p class="sub">No favourite player values found in this file.</p>` : `
+    <div class="players"><div class="panel top tilt"><div class="k">Highest marketing value</div><div class="pn">${esc(P[0].name)}</div><div class="pm">${fmt(P[0].fan_count)} fans name her as their favourite</div>
+      <div class="pg"><div><b style="color:${P[0].sentiment_lift >= 0 ? GOOD : RED}">${P[0].sentiment_lift >= 0 ? "+" : ""}${P[0].sentiment_lift}</b><span>Engagement vs average</span></div><div><b style="color:${BLUE}">${P[0].engagement_mult}x</b><span>Engagement multiple</span></div><div><b style="color:${PURPLE}">${P[0].merch_index}</b><span>Merch index</span></div><div><b style="color:${AMBER}">${P[0].marketing_value}</b><span>Marketing value</span></div></div></div>
+    <div class="tbl"><table><thead><tr><th>#</th><th>Player</th><th>Fans</th><th>Engagement vs avg</th><th>Multiple</th><th>Merch index</th><th>Marketing value</th></tr></thead><tbody>
+      ${P.map((p, i) => `<tr><td class="num">${i + 1}</td><td style="font-weight:650">${esc(p.name)}</td><td class="num">${fmt(p.fan_count)}</td><td class="num" style="color:${p.sentiment_lift >= 0 ? GOOD : RED}">${p.sentiment_lift >= 0 ? "+" : ""}${p.sentiment_lift}</td><td class="num">${p.engagement_mult}x</td><td><div class="mini"><i style="width:${p.merch_index}%"></i></div>${p.merch_index}</td><td class="num" style="font-weight:800">${p.marketing_value}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+  out.innerHTML = `
+  <section class="panel sec">${head("Fan cohorts, at-risk segments", R.cohorts.length ? "data" : null, "Each age band scored on risk (how long since they last came) with a ready-to-run action.")}${cohortHtml}</section>
+  <section class="grid2">
+    <div class="panel sec">${head("Churn risk by cohort", R.churn.length ? "data" : null, "Chance each group stops coming, calibrated against your own attendance spread.")}${churnHtml}</div>
+    <div class="panel sec">${head("Attendance prediction, next three fixtures", "model", "Built from your ticket demand and engagement. Fixture details aren't in a fan CRM, so these are scenarios.")}
+      <div class="fixtures">${R.attendance.map(a => { const h = a.at_risk ? RED : a.predicted_pct >= 85 ? GOOD : BLUE; return `<div class="fx" style="--c:${h}"><div class="fn">${esc(a.opponent)}${a.is_rival ? ` ${pill("Derby", "blue")}` : ""}</div><div class="fv">${a.predicted_pct}%</div><div class="track"><i style="width:${a.predicted_pct}%;background:${h}"></i></div><small>Range ${a.low}% to ${a.high}% · ${a.days_away} days away${a.at_risk ? " · below 70%, at risk" : ""}</small></div>`; }).join("")}</div>
+    </div>
+  </section>
+  <section class="panel sec">${head("Fan risk per fixture", "model", "Lower is better. Combines fan engagement, recent form, expected fill and how soon the game is.")}
+    <div class="fixtures three">${R.risk.fixture_risks.map(x => `<div class="fx" style="--c:${LVL_HEX[x.risk_level]}"><div class="fn">${x.home ? "Home" : "Away"}: ${esc(x.opponent)}${x.is_rival ? ` ${pill("Derby", "blue")}` : ""}</div><div class="fv">${x.risk_score}<small> / 100</small></div><div class="track"><i style="width:${x.risk_score}%;background:${LVL_HEX[x.risk_level]}"></i></div><small>Expected fill ${x.att_pct}% · ${x.days_away} days away</small></div>`).join("")}</div>
+  </section>
+  <section class="panel sec">${head("Player intelligence, ranked by marketing value", f.player_intelligence ? "data" : null, "Which players' fans are most engaged, and how many fans each one pulls in.")}${playerHtml}</section>`;
+}
+
+/* ================= Sponsorship ================= */
+const SPONSOR_CATS = [
+  ["Sports Apparel", "HIGH", "Nike, Adidas, New Balance", "Strong female 18-35 core audience"],
+  ["Healthcare / Wellbeing", "HIGH", "Vitality, Boots, Bupa", "Health-conscious fan demographic"],
+  ["Financial Services", "MED", "Barclays, Starling, Monzo", "Growing 26-45 high-earning bracket"],
+  ["Tech & Productivity", "MED", "Adobe, Microsoft, Canva", "High digital engagement index"],
+  ["Food & Beverage", "LOW", "Lucozade, Greggs, Uber Eats", "Matchday concession opportunity"]
+];
+function renderSponsor(R) {
+  const out = $("outlook"), sp = R.sponsorship, ps = sp.pitch;
+  const pc = ps >= 75 ? GOOD : ps >= 60 ? BLUE : ps >= 45 ? AMBER : RED;
+  const pl = ps >= 75 ? "Premium sponsorship property" : ps >= 60 ? "Strong audience proposition" : ps >= 45 ? "Emerging commercial value" : "Developing audience";
+  const gCols = [BRAND, BLUE, AMBER, GREY];
+  const ageCols = [BRAND, PURPLE, BLUE, GREY];
+  const topArea = sp.areas && sp.areas[0];
+  out.innerHTML = `
+  <div class="chead"><div><h2>Sponsorship intelligence</h2><p>The audience case you'd put in front of a sponsor, built from your own fan file.</p></div>
+    <button class="btn btn-primary" id="dlSpon" type="button">Download sponsorship deck (PDF)</button></div>
+  <section class="sgrid">
+    <div class="panel gauge tilt">${gauge(ps, pc, "Sponsorship pitch score")}<div><b>${pl}</b><span>Pitch score from engagement (${R.kpis.sentiment_score}), ticket demand (${r0(R.kpis.demand_index * 100)}%) and risk. WSL benchmark: 58.</span></div></div>
+    <div class="panel kpi tilt"><b>${sp.female != null ? sp.female + "%" : "-"}</b><div class="l">Female audience</div><div class="s">${sp.gender ? "From your Gender column" : "Add a Gender column"}</div></div>
+    <div class="panel kpi tilt"><b>${sp.core != null ? sp.core + "%" : "-"}</b><div class="l">Fans aged 35 and under</div><div class="s">${sp.age ? "From your Age column" : "Add an Age column"}</div></div>
+    <div class="panel kpi tilt"><b style="font-size:1.6rem">${topArea ? esc(topArea[0]) : "-"}</b><div class="l">Biggest fan area</div><div class="s">${topArea ? `${fmt(topArea[1])} fans, ${r0(topArea[2])}% of those with a postcode` : "Add a Postcode_District column"}</div></div>
+  </section>
+  <section class="grid2 even">
+    <div class="panel sec">${head("Gender split", sp.gender ? "data" : null)}${sp.gender ? `<div class="donutwrap">${donut(sp.gender.map(g => [g[0], g[2]]), gCols, fmt(sp.gender.reduce((a, g) => a + g[2], 0)), "fans")}<div class="seglist">${sp.gender.map((g, i) => `<div class="segrow"><i style="background:${gCols[i]}"></i><span>${esc(g[0])}</span><b>${fmt(g[2])}</b><span class="p">${g[1]}%</span></div>`).join("")}</div></div>` : gate("Gender split", ["Gender"])}</div>
+    <div class="panel sec">${head("Age mix", sp.age ? "data" : null)}${sp.age ? hbars(["18-25", "26-35", "36-45", "46+"].map((l, i) => [l, sp.age[i], ageCols[i], sp.age[i] + "%"]), { max: Math.max(...sp.age) }) : gate("Age mix", ["Age"])}</div>
+  </section>
+  <section class="grid2 even">
+    <div class="panel sec">${head("Where your fans live", sp.areas ? "data" : null, "Top postcode districts in your file.")}${sp.areas ? hbars(sp.areas.map(a => [a[0], a[1], BLUE, `${fmt(a[1])} · ${r0(a[2])}%`])) : gate("Fan geography", ["Postcode_District"])}</div>
+    <div class="panel sec">${head("Audience quality by tier", sp.segs ? "data" : null, "Average FanIntel engagement per membership tier" + (R.cm.Spend ? ", with average spend." : "."))}${sp.segs ? `<div class="tbl"><table><thead><tr><th>Tier</th><th>Fans</th><th>Engagement</th>${R.cm.Spend ? "<th>Avg spend</th>" : ""}</tr></thead><tbody>${sp.segs.map(s => `<tr><td style="font-weight:650">${esc(s.segment)}</td><td class="num">${fmt(s.fans)}</td><td><div class="mini"><i style="width:${s.engagement}%"></i></div>${r0(s.engagement)}</td>${R.cm.Spend ? `<td class="num">${gbp(s.spend)}</td>` : ""}</tr>`).join("")}</tbody></table></div>` : gate("Audience quality by tier", ["Membership_Type"])}</div>
+  </section>
+  <section class="panel sec">${head("Sponsor exposure per fixture", "model", `How much exposure a sponsor gets at each type of fixture. League average is ${R.exposure.league_avg}.`)}
+    <div class="fixtures three">${R.exposure.fixtures.map(f => { const h = f.is_premium ? GOOD : f.sponsor_index >= 55 ? BLUE : GREY; return `<div class="fx" style="--c:${h}"><div class="fn">${esc(f.opponent)}${f.is_premium ? ` ${pill("Premium slot", "green")}` : ""}</div><div class="fv">${f.sponsor_index}</div><div class="track"><i style="width:${f.sponsor_index}%;background:${h}"></i></div><small>${f.vs_benchmark >= 0 ? "+" : ""}${f.vs_benchmark} vs league · expected fill ${f.att_pct}%</small></div>`; }).join("")}</div></section>
+  <section class="panel sec">${head("Sponsor category recommendations", null, "Indicative fit for a WSL audience. Check it against the audience numbers above before you pitch.")}
+    <div class="cats">${SPONSOR_CATS.map(([cat, fit, brands, why]) => `<div class="cat"><div class="t"><b>${esc(cat)}</b>${pill(fit === "HIGH" ? "High fit" : fit === "MED" ? "Medium fit" : "Low fit", fit === "HIGH" ? "green" : fit === "MED" ? "amber" : "grey")}</div><div class="br">${esc(brands)}</div><p>${esc(why)}</p></div>`).join("")}</div></section>`;
+  $("dlSpon").addEventListener("click", () => {
+    if (!window.jspdf) return toast("The PDF library didn't load. Check your connection and refresh.");
+    const blocks = [{ h: `Pitch score: ${ps}/100, ${pl}` }, { kv: [["Fans in file", fmt(R.D.n)], ["Engagement score", `${R.kpis.sentiment_score}/100`], ["Ticket demand", `${r0(R.kpis.demand_index * 100)}%`], ["Female audience", sp.female != null ? sp.female + "%" : "Not in file"], ["Fans aged 35 and under", sp.core != null ? sp.core + "%" : "Not in file"], ["Biggest fan area", topArea ? topArea[0] : "Not in file"]] }];
+    if (sp.segs) { blocks.push({ h: "Audience quality by tier" }); blocks.push({ kv: sp.segs.map(s => [s.segment, `${fmt(s.fans)} fans, engagement ${r0(s.engagement)}${s.spend != null ? ", avg spend GBP " + fmt(s.spend) : ""}`]) }); }
+    blocks.push({ h: "Sponsor category recommendations" });
+    SPONSOR_CATS.forEach(([cat, fit, brands, why]) => blocks.push({ h: `${cat} - fit: ${fit}`, size: 11 }, { p: `Example brands: ${brands}`, color: [110, 118, 135], gap: 1 }, { p: why, gap: 6 }));
+    saveFile("fanintel_sponsorship_deck.pdf", simplePdf("Sponsorship deck", blocks));
+  });
+}
+function simplePdf(title, blocks) {
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210, M = 16, CW = W - M * 2; let y;
+  const need = h => { if (y + h > 282) { doc.addPage(); y = 18; } };
+  doc.setFillColor(14, 26, 46); doc.rect(0, 0, W, 30, "F");
+  doc.setTextColor(196, 181, 253); doc.setFont("helvetica", "bold"); doc.setFontSize(20); doc.text("FanIntel", M, 15);
+  doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.text(title + " · WSL Edition", M, 23);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text("Generated " + new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }), W - M, 23, { align: "right" });
+  y = 42;
+  blocks.forEach(b => {
+    if (b.h) { need(14); doc.setFont("helvetica", "bold"); doc.setFontSize(b.size || 13); doc.setTextColor(14, 26, 46); doc.text(b.h, M, y); y += 7; }
+    if (b.p) { const lines = doc.splitTextToSize(b.p.replace(/£/g, "GBP "), CW); need(lines.length * 5.2); doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...(b.color || [50, 58, 74])); doc.text(lines, M, y); y += lines.length * 5.2 + (b.gap ?? 5); }
+    if (b.kv) { b.kv.forEach(([kk, v]) => { const lines = doc.splitTextToSize(String(v).replace(/£/g, "GBP "), CW - 62); need(lines.length * 5.5 + 2); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(90, 100, 120); doc.text(kk, M, y); doc.setFont("helvetica", "normal"); doc.setTextColor(20, 26, 40); doc.text(lines, M + 62, y); y += lines.length * 5.5 + 1.5; }); y += 4; }
+  });
+  need(10); doc.setFontSize(8.5); doc.setTextColor(140, 150, 165); doc.text("Generated by FanIntel. Audience figures come from the uploaded file; exposure figures are modelled.", M, y + 4);
+  return doc.output("blob");
+}
+
+/* ================= Matchday ================= */
+let capacity = 5000;
+function renderMatchday(R) {
+  const out = $("outlook"), m = FanIntel.matchday(R.D, R.kpis, capacity);
+  const segCols = [BRAND, PURPLE, BLUE, AMBER];
+  const pool = R.reveal.hasDays && R.reveal.lapsed > 0 ? [R.reveal.lapsed, "lapsed fans who haven't been in six months"] : m.nonBuyers > 0 ? [m.nonBuyers, "fans who have never bought a ticket"] : null;
+  const conv = pool ? { v: r0(pool[0] * 0.10) * 38, base: `${fmt(pool[0])} ${pool[1]}`, n: r0(pool[0] * 0.10) } : null;
+  out.innerHTML = `
+  <div class="chead"><div><h2>Matchday intelligence</h2><p>Revenue per home fixture and the fans most worth a hospitality call.</p></div>
+    <label class="cap">Stadium capacity <input id="capIn" type="number" min="100" step="100" value="${capacity}" inputmode="numeric"></label></div>
+  <section class="kpis four">
+    <div class="panel kpi tilt"><b style="color:${BRAND}">${gbp(m.revenue)}</b><div class="l">Est. revenue per home fixture</div><div class="s">${fmt(m.att)} fans at ${r0(R.kpis.demand_index * 100)}% fill</div></div>
+    <div class="panel kpi tilt"><b style="font-size:1.45rem">${esc(m.top.segment)}</b><div class="l">Top revenue segment</div><div class="s">${gbp(m.top.revenue)} per fixture</div></div>
+    <div class="panel kpi tilt"><b>${gbp(m.blended)}</b><div class="l">Average spend per fan</div><div class="s">Blended across segments</div></div>
+    <div class="panel kpi tilt"><b>${fmt(m.targets.length)}</b><div class="l">Hospitality targets</div><div class="s">Highly engaged, not seen in 3+ months</div></div>
+  </section>
+  ${conv ? `<section class="oppo"><span>Revenue opportunity</span><p>Getting 10% of your ${conv.base} back through the door (${fmt(conv.n)} fans) adds <b>${gbp(conv.v)}</b> per fixture at general admission spend.</p></section>` : ""}
+  <section class="grid2">
+    <div class="panel sec">${head("Estimated revenue by segment", m.fromData ? "data" : "model", m.fromData ? "Crowd mix taken from your Membership_Type column. Spend per fan is a matchday assumption." : "Add a Membership_Type column to use your real crowd mix. This uses a typical WSL split.")}
+      ${hbars(m.segs.map((s, i) => [s.segment, s.revenue, segCols[i], gbp(s.revenue)]))}
+      <div class="tbl" style="margin-top:12px"><table><thead><tr><th>Segment</th><th>Share</th><th>Fans</th><th>Spend per fan</th></tr></thead><tbody>${m.segs.map((s, i) => `<tr><td>${esc(s.segment)}</td><td class="num">${r0(m.split[i] * 100)}%</td><td class="num">${fmt(s.fans)}</td><td class="num">${gbp(s.avg_spend)}</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="panel sec">${head("Hospitality target list", m.targets.length ? "data" : null, "Your most engaged fans who haven't been to a game in 3+ months. Real fans from your file.")}
+      ${m.targets.length ? `<div class="tbl scroll"><table><thead><tr><th>Fan</th><th>Engagement</th><th>Last seen</th>${R.cm.Spend ? "<th>Spend</th>" : ""}${R.cm.Membership_Type ? "<th>Tier</th>" : ""}</tr></thead><tbody>${m.targets.map(t => `<tr><td style="font-weight:650">${esc(t.id)}</td><td><div class="mini"><i style="width:${t.engagement}%"></i></div>${t.engagement}</td><td class="num">${t.months} months ago</td>${R.cm.Spend ? `<td class="num">${isNaN(t.spend) ? "-" : gbp(t.spend)}</td>` : ""}${R.cm.Membership_Type ? `<td>${esc(t.tier ?? "")}</td>` : ""}</tr>`).join("")}</tbody></table></div>
+      <div class="row-btn"><button class="btn btn-ghost btn-sm" id="dlTargets" type="button">Download list (CSV)</button></div>` : gate("Hospitality targets", ["Last_Attended"])}</div>
+  </section>`;
+  $("capIn").addEventListener("change", e => { const v = Math.round(+e.target.value); if (v >= 100 && v <= 120000) { capacity = v; renderMatchday(R); bindTilt(); } else e.target.value = capacity; });
+  const dl = $("dlTargets"); if (dl) dl.addEventListener("click", () => saveFile("fanintel_hospitality_targets.csv", new Blob([toCsv(["Fan", "Engagement", "Months since last attended", "Spend", "Tier"], m.targets.map(t => [t.id, t.engagement, t.months, isNaN(t.spend) || t.spend == null ? "" : t.spend, t.tier ?? ""]))], { type: "text/csv" })));
+}
+
+/* ================= Fan Acquisition ================= */
+function renderAcquisition(R) {
+  const out = $("outlook"), a = R.acquisition, top = a.markets.slice(0, 5);
+  const gapTxt = g => `${g > 0 ? "+" : ""}${g}pp`;
+  const maxA = Math.max(...a.current, ...a.target);
+  out.innerHTML = `
+  <div class="chead"><div><h2>Fan acquisition</h2><p>Who's missing from your fanbase, where your fans are, and which markets to grow next.</p></div></div>
+  <section class="kpis three">
+    <div class="panel kpi tilt"><b style="color:${a.gap[a.worst] > 0 ? AMBER : BLUE}">${a.labels[a.worst]}</b><div class="l">Biggest age gap</div><div class="s">${a.gap[a.worst] > 0 ? `${a.gap[a.worst]} points below the target mix` : `${-a.gap[a.worst]} points above the target mix`}</div></div>
+    <div class="panel kpi tilt"><b style="font-size:1.6rem">${a.areas ? esc(a.areas[0].area) : "-"}</b><div class="l">Biggest domestic area</div><div class="s">${a.areas ? `${fmt(a.areas[0].fans)} fans` : "Add a Postcode_District column"}</div></div>
+    <div class="panel kpi tilt"><b style="font-size:1.6rem">${esc(top[0].country)}</b><div class="l">Top international market</div><div class="s">Priority ${top[0].priority}, modelled</div></div>
+  </section>
+  <section class="grid2">
+    <div class="panel sec">${head("Age mix: now vs target", a.fromData ? "data" : "model", a.fromData ? "Your current mix from the Age column, against a younger growth target." : "Add an Age column to compare your real age mix.")}
+      <div class="agechart">${a.labels.map((l, i) => `<div class="ag"><div class="bars"><i class="cur" style="height:${a.current[i] / maxA * 100}%"><span>${a.current[i]}%</span></i><i class="tgt" style="height:${a.target[i] / maxA * 100}%"><span>${a.target[i]}%</span></i></div><b>${l}</b><small style="color:${a.gap[i] > 0 ? AMBER : GREY}">${gapTxt(a.gap[i])}</small></div>`).join("")}</div>
+      <div class="vlegend static"><span><i style="background:${BLUE}"></i>Your fans now</span><span><i style="background:${BRAND}"></i>Target mix</span></div></div>
+    <div class="panel sec">${head("Where your fans live", a.areas ? "data" : null, "Areas with a high share of lapsed fans are your best local win-back targets.")}
+      ${a.areas ? `<div class="tbl"><table><thead><tr><th>Area</th><th>Fans</th><th>Engagement</th>${R.cm.Last_Attended ? "<th>Lapsed 180+ days</th>" : ""}</tr></thead><tbody>${a.areas.map(x => `<tr><td style="font-weight:650">${esc(x.area)}</td><td class="num">${fmt(x.fans)}</td><td><div class="mini"><i style="width:${x.engagement}%"></i></div>${r0(x.engagement)}</td>${R.cm.Last_Attended ? `<td class="num" style="color:${x.lapsed >= 60 ? RED : x.lapsed >= 40 ? AMBER : GOOD};font-weight:750">${r0(x.lapsed)}%</td>` : ""}</tr>`).join("")}</tbody></table></div>` : gate("Fan geography", ["Postcode_District"])}</div>
+  </section>
+  <section class="grid2">
+    <div class="panel sec">${head("International acquisition priority", "model", "A fan CRM doesn't hold overseas reach, so these priorities are a model, nudged by your engagement and demand.")}
+      ${hbars(a.markets.map(m => [m.country, m.priority, m.priority >= 70 ? BRAND : m.priority >= 55 ? PURPLE : BLUE, String(m.priority)]), { max: 100 })}</div>
+    <div class="panel sec">${head("Top 5 markets, how to activate", "model")}
+      <ol class="markets">${top.map(m => `<li><b>${esc(m.country)}</b>${pill("Priority " + m.priority, "violet")}<p>${esc(m.activation)}</p></li>`).join("")}</ol></div>
+  </section>`;
+}
+
+/* ================= Player Welfare ================= */
+function renderWelfare(R) {
+  const out = $("outlook"), W = R.welfare, recs = W.recs, n = recs.length;
+  const high = recs.filter(r => r.severity === "HIGH").length;
+  const byPlayer = {}; recs.forEach(r => byPlayer[r.player] = (byPlayer[r.player] || 0) + 1);
+  const players = Object.entries(byPlayer).sort((a, b) => b[1] - a[1]);
+  const byPlat = {}; recs.forEach(r => byPlat[r.platform] = (byPlat[r.platform] || 0) + 1);
+  const plats = Object.entries(byPlat).sort((a, b) => b[1] - a[1]);
+  const byCat = {}; recs.forEach(r => byCat[r.category] = (byCat[r.category] || 0) + 1);
+  const days = new Array(30).fill(0); recs.forEach(r => days[29 - r.daysAgo]++);
+  const maxD = Math.max(1, ...days);
+  const pts = days.map((v, i) => [12 + i * (576 / 29), 140 - v / maxD * 120]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const accounts = {}; recs.forEach(r => { const a = accounts[r.account] || (accounts[r.account] = { n: 0, s: 0, cats: {} }); a.n++; a.s += r.score; a.cats[r.category] = (a.cats[r.category] || 0) + 1; });
+  const acc = Object.entries(accounts).sort((a, b) => b[1].n - a[1].n || b[1].s - a[1].s).slice(0, 8);
+  const dayLabel = i => { const d = new Date(W.today); d.setDate(d.getDate() - (29 - i)); return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+  out.innerHTML = `
+  <div class="demo-banner"><b>Demo data.</b> Player Welfare shows what a safeguarding feed looks like once FanIntel is connected to social listening. Every post here is synthetic and the players are anonymised. Nothing comes from your file.</div>
+  <section class="kpis four">
+    <div class="panel kpi tilt"><b style="color:${RED}">${n}</b><div class="l">Flagged posts</div><div class="s">Last 30 days</div></div>
+    <div class="panel kpi tilt"><b style="color:${RED}">${high}</b><div class="l">High severity</div><div class="s">${r0(high / n * 100)}% of flagged posts</div></div>
+    <div class="panel kpi tilt"><b style="color:${AMBER}">${players.length}</b><div class="l">Players targeted</div></div>
+    <div class="panel kpi tilt"><b style="color:${AMBER}">${Object.keys(accounts).length}</b><div class="l">Accounts flagged</div></div>
+  </section>
+  <section class="panel sec">${head("30-day abuse timeline", null, "Abuse spikes around match days, marked with dotted lines.")}
+    <svg viewBox="0 0 600 170" class="timeline" role="img" aria-label="Flagged posts per day over 30 days">
+      ${W.matchDays.map(md => { const x = 12 + (29 - md) * (576 / 29); return `<line x1="${x}" x2="${x}" y1="10" y2="140" stroke="${AMBER}" stroke-dasharray="3 3"/><text x="${x + 3}" y="18" font-size="9" fill="${AMBER}">Match day</text>`; }).join("")}
+      <path d="${line} L ${pts[29][0]} 140 L ${pts[0][0]} 140 Z" fill="rgba(201,58,58,.10)"/><path d="${line}" fill="none" stroke="${RED}" stroke-width="2"/>
+      ${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.6" fill="${RED}"/>`).join("")}
+      <text x="12" y="160" font-size="9" fill="#8A97AC">${dayLabel(0)}</text><text x="588" y="160" font-size="9" fill="#8A97AC" text-anchor="end">${dayLabel(29)}</text>
+    </svg></section>
+  <section class="grid2 even">
+    <div class="panel sec">${head("Players most targeted")}${hbars(players.map(p => [p[0], p[1], RED]))}</div>
+    <div class="panel sec">${head("Platform and category")}<div class="donutwrap">${donut(plats, [RED, AMBER, BLUE], n, "posts")}<div class="seglist">${plats.map((p, i) => `<div class="segrow"><i style="background:${[RED, AMBER, BLUE][i]}"></i><span>${esc(p[0])}</span><b>${p[1]}</b><span class="p">${r0(p[1] / n * 100)}%</span></div>`).join("")}</div></div>
+      <div class="catrow">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => pill(`${c}: ${v}`, c === "Threat" || c === "Slur" ? "red" : c === "Identity attack" ? "amber" : "grey")).join("")}</div></div>
+  </section>
+  <section class="panel sec">${head("Account tracker", null, "Accounts posting the most abuse, for your safeguarding team to report.")}
+    <div class="tbl"><table><thead><tr><th>Account</th><th>Posts</th><th>Avg toxicity</th><th>Main category</th></tr></thead><tbody>
+      ${acc.map(([a, v]) => { const avg = v.s / v.n, top = Object.entries(v.cats).sort((x, y) => y[1] - x[1])[0][0]; return `<tr><td style="font-weight:650">${esc(a)}</td><td class="num">${v.n}</td><td class="num" style="color:${avg >= 80 ? RED : avg >= 55 ? AMBER : GOOD};font-weight:800">${avg.toFixed(1)}</td><td>${esc(top)}</td></tr>`; }).join("")}
+    </tbody></table></div></section>`;
+}
+
+/* ================= 3D engagement stand ================= */
+let viz = null;
+function stopViz() { if (viz) { cancelAnimationFrame(viz.raf); viz.ro.disconnect(); viz.renderer.dispose(); viz = null; } }
+function startViz(R) {
+  stopViz();
+  const host = $("viz"), canvas = $("vizc");
+  if (!window.THREE || !host) return;
+  let renderer; try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch (e) { host.classList.add("noviz"); return; }
+  const E = R.D.eng, n = E.length, MAX = 6000, per = Math.max(1, Math.ceil(n / MAX));
+  const order = E.map((e, i) => i).filter(i => !isNaN(E[i])).sort((a, b) => E[b] - E[a]);
+  const pick = []; for (let k = 0; k < order.length; k += per) pick.push(order[k]);
+  const N = pick.length;
+  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(36, 1, 1, 1000);
+  const pos = new Float32Array(N * 3), tgt = new Float32Array(N * 3), col = new Float32Array(N * 3), alp = new Float32Array(N), t0 = new Float32Array(N);
+  const cols = Math.round(Math.sqrt(N * 2.4)), sp = 100 / cols;
+  const C = ENG_BANDS.map(b => new THREE.Color(b[1]));
+  const now = performance.now();
+  for (let k = 0; k < N; k++) {
+    const r = Math.floor(k / cols), c = k % cols, u = c / Math.max(1, cols - 1) * 2 - 1;
+    tgt[k * 3] = u * 50; tgt[k * 3 + 1] = -22 + r * sp * .62 - u * u * sp * 3; tgt[k * 3 + 2] = 20 - r * sp * .95 + u * u * sp * 3;
+    pos[k * 3] = tgt[k * 3]; pos[k * 3 + 1] = tgt[k * 3 + 1] - 30; pos[k * 3 + 2] = tgt[k * 3 + 2];
+    const e = E[pick[k]], cc = C[e >= 65 ? 0 : e >= 30 ? 1 : 2]; col[k * 3] = cc.r; col[k * 3 + 1] = cc.g; col[k * 3 + 2] = cc.b;
+    t0[k] = now + (reduce ? 0 : r * 28 + Math.random() * 200);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.setAttribute("alpha", new THREE.BufferAttribute(alp, 1));
+  const mat = new THREE.ShaderMaterial({ uniforms: { uSize: { value: 1 } },
+    vertexShader: `attribute float alpha; attribute vec3 color; varying float vA; varying vec3 vC; uniform float uSize;
+      void main(){ vA = alpha; vC = color; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = uSize * (100.0 / -mv.z); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `varying float vA; varying vec3 vC;
+      void main(){ vec2 p = gl_PointCoord - 0.5; float d = length(p); float a = smoothstep(0.5, 0.34, d) * vA; if (a < 0.02) discard;
+        float shade = 1.0 + 0.4 * smoothstep(0.3, 0.0, length(p + vec2(0.12, 0.12))); gl_FragColor = vec4(vC * shade, a); }`,
+    transparent: true, depthWrite: false });
+  scene.add(new THREE.Points(geo, mat));
+  function size() {
+    const w = host.clientWidth, h = host.clientHeight, dpr = Math.min(devicePixelRatio || 1, 2);
+    renderer.setPixelRatio(dpr); renderer.setSize(w, h, false); camera.aspect = w / h;
+    const dist = Math.max(100, 118 / (2 * Math.tan(18 * Math.PI / 180) * camera.aspect)); camera.userData.dist = dist; camera.updateProjectionMatrix();
+    mat.uniforms.uSize.value = Math.min(sp * .64, 2.4) * h / (2 * Math.tan(18 * Math.PI / 180) * dist) * dpr * (dist / 100);
+  }
+  let ys = 0; for (let k = 0; k < N; k++) ys += tgt[k * 3 + 1]; const midY = N ? ys / N : 0;
+  const ro = new ResizeObserver(size); ro.observe(host); size();
+  let last = performance.now();
+  function loop(t) {
+    const dt = Math.min(.05, (t - last) / 1000); last = t;
+    for (let k = 0; k < N; k++) { if (t < t0[k]) continue; const f = 1 - Math.exp(-dt * 4), j = k * 3; pos[j + 1] += (tgt[j + 1] - pos[j + 1]) * f; alp[k] += (1 - alp[k]) * f; }
+    geo.attributes.position.needsUpdate = geo.attributes.alpha.needsUpdate = true;
+    const d = camera.userData.dist, sway = reduce ? 0 : Math.sin(t / 4000) * 10;
+    camera.position.set(sway + ptr.sx * 10, midY + 40 - ptr.sy * 6, d); camera.lookAt(0, midY - 6, -8);
+    renderer.render(scene, camera);
+    viz.raf = requestAnimationFrame(loop);
+  }
+  viz = { renderer, ro, raf: 0 }; viz.raf = requestAnimationFrame(loop);
+}
+
+/* ================= tilt + background ================= */
+const ptr = { x: 0, y: 0, sx: 0, sy: 0 };
+let tilts = [];
+function bindTilt() { tilts = [...document.querySelectorAll(".tilt")]; }
+addEventListener("pointermove", e => { ptr.x = e.clientX / innerWidth * 2 - 1; ptr.y = e.clientY / innerHeight * 2 - 1; });
+const cv = $("field"), ctx = cv.getContext("2d"); let W, H, dots = [];
+function bgSize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  dots = []; const n = Math.round(W * H / 5200);
+  for (let i = 0; i < n; i++) dots.push({ x: Math.random() * W, y: H * (.55 + Math.random() * .5), z: Math.random(), p: Math.random() * 6.28 });
+}
+addEventListener("resize", bgSize); bgSize(); bindTilt();
+(function bgLoop(t) {
+  const k = reduce ? 0 : 1;
+  ptr.sx += (ptr.x - ptr.sx) * .06; ptr.sy += (ptr.y - ptr.sy) * .06;
+  for (const el of tilts) { el.style.setProperty("--ry", (ptr.sx * 3).toFixed(2) + "deg"); el.style.setProperty("--rx", (-ptr.sy * 2.5).toFixed(2) + "deg"); }
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#0E1A2E";
+  for (const d of dots) {
+    const s = .8 + d.z * 1.8, x = d.x + ptr.sx * 12 * d.z + Math.sin(t / 3000 * k + d.p) * 4 * d.z;
+    ctx.globalAlpha = .05 + d.z * .12; ctx.fillRect(x, d.y + Math.cos(t / 3500 * k + d.p) * 3 * d.z, s, s);
+  }
+  ctx.globalAlpha = 1; requestAnimationFrame(bgLoop);
+})(0);
+</script>
+<script>
+const Landing = (() => {
+let CFG = null, alive = false, booted = false;
+let ready = 0;
+const fmt = n => Math.round(n).toLocaleString("en-GB");
+const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = id => document.getElementById(id);
+
+const stage = $("L_stage"), copyEl = $("L_copy"), leadEl = $("L_lead"), numEl = $("L_num"), tagEl = $("L_tag");
+const ringEl = $("L_ring"), ctaEl = $("L_cta"), barEl = $("L_bar"), skipBtn = $("L_skip");
+const crm = $("L_crm"), crmNum = $("L_crmNum"), sides = [$("L_weights"), $("L_signals")];
+let W = 0, H = 0, dpr = 1;
+
+/* ================= three.js ================= */
+let glOK = !!window.THREE, renderer, scene, camera, geo, mat;
+const FOV = 40, CAMZ = 100;
+let N = 0;
+let pos, tgt, col, colT, alp, alpT, t0, kk, grp, gone, sph, stand;
+let C = {};
+function readColors() {
+  const s = getComputedStyle(document.documentElement), g = v => s.getPropertyValue(v).trim();
+  if (!glOK) return;
+  C = { ink: new THREE.Color(g("--ink")), ghost: new THREE.Color(g("--ghost")), lime: new THREE.Color("#6D28D9") };
+  if (pos) for (let i = 0; i < N; i++) {
+    const key = grp[i] >= 100 ? "lime" : gone[i] ? "ghost" : "ink";
+    setC(colT, i, C[key]); setC(col, i, C[key]);
+  }
+}
+const setC = (a, i, c) => { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; };
+const visH = () => 2 * Math.tan(FOV / 2 * Math.PI / 180) * CAMZ;
+const visW = () => visH() * W / H;
+const wy = f => (0.5 - f) * visH();
+
+function initGL() {
+  if (!renderer) { try { renderer = new THREE.WebGLRenderer({ canvas: $("L_c"), antialias: true, alpha: true }); } catch (e) { glOK = false; return; } }
+  if (geo) { geo.dispose(); mat.dispose(); }
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(FOV, 1, 1, 1000);
+  pos = new Float32Array(N * 3); tgt = new Float32Array(N * 3);
+  col = new Float32Array(N * 3); colT = new Float32Array(N * 3);
+  alp = new Float32Array(N); alpT = new Float32Array(N);
+  t0 = new Float32Array(N); kk = new Float32Array(N); grp = new Uint8Array(N); gone = new Uint8Array(N);
+  stand = new Float32Array(N * 3);
+  geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.setAttribute("alpha", new THREE.BufferAttribute(alp, 1));
+  mat = new THREE.ShaderMaterial({
+    uniforms: { uSize: { value: 1 } },
+    vertexShader: `
+      attribute float alpha; attribute vec3 color; varying float vA; varying vec3 vC; uniform float uSize;
+      void main(){ vA = alpha; vC = color; vec4 mv = modelViewMatrix * vec4(position,1.0);
+        gl_PointSize = uSize * (100.0 / -mv.z); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `
+      varying float vA; varying vec3 vC;
+      void main(){ vec2 p = gl_PointCoord - 0.5; float d = length(p);
+        float a = smoothstep(0.5, 0.36, d) * vA; if (a < 0.02) discard;
+        float shade = 1.0 + 0.35 * smoothstep(0.3, 0.0, length(p + vec2(0.12, 0.12)));
+        gl_FragColor = vec4(vC * shade, a); }`,
+    transparent: true, depthWrite: false
+  });
+  scene.add(new THREE.Points(geo, mat));
+  // sphere directions for finale
+  const nr = N - CFG.steps.reduce((s, x) => s + Math.round(x.n / CFG.per), 0);
+  sph = [];
+  for (let i = 0; i < nr; i++) { const y = 1 - (i + .5) / nr * 2, r = Math.sqrt(1 - y * y), th = i * 2.399963; sph.push([Math.cos(th) * r, y, Math.sin(th) * r]); }
+}
+
+let spacing = 1;
+function buildStand() {
+  // a curved terrace: rows rise and step back, ends wrap towards camera
+  const vw = visW(), mobile = W < 700, aw = vw * (mobile ? .94 : .9) * Math.min(1, Math.sqrt(N / 4000) * 1.7);
+  const front = wy(mobile ? .86 : .85);
+  const cols = Math.round(Math.sqrt(N * (mobile ? .85 : 2.7))), rows = Math.ceil(N / cols);
+  spacing = aw / cols;
+  for (let i = 0; i < N; i++) {
+    const c = i % cols, r = Math.floor(i / cols);
+    const u = (c / (cols - 1)) * 2 - 1;
+    stand[i * 3] = u * aw / 2 + (Math.random() - .5) * spacing * .15;
+    stand[i * 3 + 1] = front + r * spacing * .62 - u * u * spacing * 3;
+    stand[i * 3 + 2] = -r * spacing * .95 + u * u * spacing * 7;
+  }
+  setPointSize(1);
+}
+function setPointSize(k) { mat.uniforms.uSize.value = Math.min(spacing, 1.5) * .4 * k * (H / visH()) * dpr; }
+
+let sphereR = 10, sphereC = new THREE.Vector3(), spin = 0;
+function sphereLayout() {
+  const top = tagEl.getBoundingClientRect().bottom + 18;
+  const bottom = ctaEl.getBoundingClientRect().top - 44;
+  const rpx = Math.max(40, Math.min((bottom - top) / 2, W * .26, 190));
+  sphereR = rpx / H * visH();
+  sphereC.set(0, wy((top + bottom) / 2 / H), 0);
+}
+
+/* ================= story ================= */
+let phase = "intro", timers = [], startT = 0, END = 19000, running = false, tw = null;
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+function tween(el, from, to, d) { tw = { el, from, to, d, t0: performance.now() }; }
+function setLead(text) {
+  const s = leadEl.firstElementChild; leadEl.classList.remove("in");
+  setTimeout(() => { s.textContent = text; requestAnimationFrame(() => leadEl.classList.add("in")); }, reduce ? 0 : 220);
+}
+function setTag(t, cls) { tagEl.textContent = t; tagEl.className = cls || ""; }
+
+function resetPoints() {
+  const g = [];
+  CFG.steps.forEach((s, i) => { for (let k = 0; k < Math.round(s.n / CFG.per); k++) g.push(i + 1); });
+  while (g.length < N) g.push(0);
+  for (let i = g.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [g[i], g[j]] = [g[j], g[i]]; }
+  for (let i = 0; i < N; i++) {
+    grp[i] = g[i]; gone[i] = 0;
+    tgt[i * 3] = stand[i * 3]; tgt[i * 3 + 1] = stand[i * 3 + 1]; tgt[i * 3 + 2] = stand[i * 3 + 2];
+    pos[i * 3] = 0; pos[i * 3 + 1] = wy(.5); pos[i * 3 + 2] = -60;
+    setC(col, i, C.ink); setC(colT, i, C.ink); alp[i] = 0; alpT[i] = 0; t0[i] = 1e12; kk[i] = 3;
+  }
+}
+function burst() {
+  const now = performance.now();
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (Math.random() - .5) * 14; pos[i * 3 + 1] = wy(.5) + (Math.random() - .5) * 8; pos[i * 3 + 2] = -70 - Math.random() * 30;
+    alpT[i] = 1; kk[i] = 2.6;
+    t0[i] = now + Math.hypot(stand[i * 3], stand[i * 3 + 2]) * 9 + Math.random() * 300;
+  }
+}
+function knockOut(g) {
+  const now = performance.now();
+  for (let i = 0; i < N; i++) if (grp[i] === g) {
+    gone[i] = 1; setC(colT, i, C.ghost);
+    t0[i] = now + 700 + Math.random() * 1000; kk[i] = 1.3;
+    tgt[i * 3] += (Math.random() - .5) * 20; tgt[i * 3 + 1] -= 45 + Math.random() * 25; tgt[i * 3 + 2] += 25 + Math.random() * 30;
+    alpT[i] = 0;
+  }
+}
+function gather(instant) {
+  sphereLayout(); const now = performance.now(); let k = 0;
+  for (let i = 0; i < N; i++) if (grp[i] === 0) {
+    grp[i] = 100; stand[i * 3] = k++;   // reuse stand x as sphere index for ready fans
+    setC(colT, i, C.lime); alpT[i] = 1;
+    t0[i] = instant ? 0 : now + Math.random() * 600; kk[i] = instant ? 99 : 2.4;
+  }
+}
+let sphIdx = new Int32Array(0);
+function sphereTargets(dt) {
+  spin += dt * .35; const c = Math.cos(spin), s = Math.sin(spin), tilt = .35, ct = Math.cos(tilt), st = Math.sin(tilt);
+  for (let i = 0; i < N; i++) if (grp[i] >= 100) {
+    const L = sph[sphIdx[i]];
+    let x = L[0] * c - L[2] * s, z = L[0] * s + L[2] * c, y = L[1];
+    const y2 = y * ct - z * st, z2 = y * st + z * ct;
+    tgt[i * 3] = sphereC.x + x * sphereR; tgt[i * 3 + 1] = sphereC.y + y2 * sphereR; tgt[i * 3 + 2] = z2 * sphereR;
+  }
+}
+function assignSphereIdx() { let k = 0; for (let i = 0; i < N; i++) if (grp[i] >= 100) sphIdx[i] = k++; }
+
+function reset() {
+  const rb = document.getElementById("L_results"); if (rb) rb.classList.remove("auto"); const lc = document.getElementById("L_count"); if (lc) lc.textContent = "";
+  timers.forEach(clearTimeout); timers = []; tw = null; phase = "intro"; spin = 0;
+  copyEl.classList.remove("on"); ringEl.classList.remove("on"); ctaEl.classList.remove("on");
+  crm.classList.remove("on", "out"); sides.forEach(s => s.classList.remove("on"));
+  crmNum.textContent = "0"; numEl.textContent = fmt(CFG.total); setTag(""); skipBtn.hidden = false;
+  leadEl.classList.remove("in"); leadEl.firstElementChild.textContent = "";
+  if (glOK) { buildStand(); resetPoints(); }
+}
+
+function run() {
+  reset(); running = true; startT = performance.now();
+  if (reduce || !glOK) { skip(); return; }
+  at(80, () => crm.classList.add("on"));
+  at(500, () => tween(crmNum, 0, CFG.total, 1600));
+  at(2600, () => { crm.classList.add("out"); burst(); });
+  at(3000, () => { copyEl.classList.add("on"); setLead("Your CRM says you have"); numEl.textContent = fmt(CFG.total); setTag("fans on the books."); });
+  let remaining = CFG.total;
+  CFG.steps.forEach((s, i) => {
+    const t = 5000 + i * 3400; const from = remaining; remaining -= s.n; const to = remaining;
+    at(t, () => { setLead(s.line); setTag(""); });
+    at(t + 500, () => { knockOut(i + 1); setTag(s.tag + "  \u2212" + fmt(s.n), "loss"); });
+    at(t + 1200, () => tween(numEl, from, to, 1300));
+  });
+  const FT = 5000 + CFG.steps.length * 3400 + 900;
+  at(FT, () => {
+    phase = "final"; setLead(CFG.finalLead);
+    setTag(CFG.finalTag, "win");
+    gather(false); assignSphereIdx(); setPointSize(1.15);
+  });
+  at(FT + 600, () => ringEl.classList.add("on"));
+  at(FT + 1000, () => sides.forEach(s => s.classList.add("on")));
+  at(FT + 2300, () => { ctaEl.classList.add("on"); skipBtn.hidden = true; $("L_results").classList.add("auto"); });
+  for (let k = 0; k < 5; k++) at(FT + 2300 + k * 1000, () => { $("L_count").textContent = `Opening your full results in ${5 - k}`; });
+  at(FT + 7300, () => { if (alive) finish(); });
+  END = FT + 7300; at(END, () => { running = false; });
+}
+
+function skip() {
+  timers.forEach(clearTimeout); timers = []; running = false; tw = null; phase = "final";
+  crm.classList.remove("on"); crm.classList.add("out");
+  copyEl.classList.add("on"); leadEl.firstElementChild.textContent = CFG.finalLead; leadEl.classList.add("in");
+  numEl.textContent = fmt(ready); setTag(CFG.finalTag, "win");
+  ringEl.classList.add("on"); ctaEl.classList.add("on"); sides.forEach(s => s.classList.add("on"));
+  skipBtn.hidden = true; barEl.style.width = "100%";
+  if (glOK) {
+    for (let i = 0; i < N; i++) if (grp[i] > 0 && grp[i] < 100) { gone[i] = 1; alp[i] = alpT[i] = 0; }
+    gather(true); assignSphereIdx(); setPointSize(1.15); sphereTargets(0);
+    for (let i = 0; i < N; i++) if (grp[i] >= 100) { pos[i * 3] = tgt[i * 3]; pos[i * 3 + 1] = tgt[i * 3 + 1]; pos[i * 3 + 2] = tgt[i * 3 + 2]; alp[i] = 1; setC(col, i, C.lime); }
+  }
+}
+
+/* ================= pointer parallax ================= */
+const ptr = { x: 0, y: 0, sx: 0, sy: 0 };
+addEventListener("pointermove", e => { ptr.x = e.clientX / innerWidth * 2 - 1; ptr.y = e.clientY / innerHeight * 2 - 1; });
+
+/* ================= loop ================= */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; const t = now / 1000;
+  if (tw) { const e = Math.min(1, (now - tw.t0) / tw.d), ee = 1 - Math.pow(1 - e, 3); tw.el.textContent = fmt(tw.from + (tw.to - tw.from) * ee); if (e >= 1) tw = null; }
+  if (running) barEl.style.width = Math.min(100, (now - startT) / END * 100) + "%";
+  const pe = 1 - Math.exp(-dt * 3);
+  ptr.sx += (ptr.x - ptr.sx) * pe; ptr.sy += (ptr.y - ptr.sy) * pe;
+  const fx = reduce ? 0 : Math.sin(t * .5) * .25, fy = reduce ? 0 : Math.cos(t * .4) * .2;
+  stage.style.setProperty("--ry", (ptr.sx * 8 + fx * 6).toFixed(2) + "deg");
+  stage.style.setProperty("--rx", (-ptr.sy * 6 + fy * 4).toFixed(2) + "deg");
+
+  if (glOK) {
+    if (phase === "final") sphereTargets(dt);
+    for (let i = 0; i < N; i++) {
+      if (now < t0[i]) continue;
+      const f = 1 - Math.exp(-dt * kk[i]), j = i * 3;
+      pos[j] += (tgt[j] - pos[j]) * f; pos[j + 1] += (tgt[j + 1] - pos[j + 1]) * f; pos[j + 2] += (tgt[j + 2] - pos[j + 2]) * f;
+      col[j] += (colT[j] - col[j]) * f; col[j + 1] += (colT[j + 1] - col[j + 1]) * f; col[j + 2] += (colT[j + 2] - col[j + 2]) * f;
+      alp[i] += (alpT[i] - alp[i]) * Math.min(1, f * 1.5);
+    }
+    geo.attributes.position.needsUpdate = geo.attributes.color.needsUpdate = geo.attributes.alpha.needsUpdate = true;
+    const sway = reduce ? 0 : Math.sin(t * .25) * 6;
+    camera.position.set(sway + ptr.sx * 8, ptr.sy * -4, CAMZ);
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  if (alive) requestAnimationFrame(frame);
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = stage.clientWidth; H = stage.clientHeight;
+  if (!glOK) return;
+  renderer.setPixelRatio(dpr); renderer.setSize(W, H, false);
+  camera.aspect = W / H; camera.updateProjectionMatrix();
+  const keep = new Float32Array(stand); buildStand();
+  if (phase === "final") { for (let i = 0; i < N; i++) if (grp[i] >= 100) stand[i * 3] = keep[i * 3]; sphereLayout(); setPointSize(1.15); }
+  else for (let i = 0; i < N; i++) if (!gone[i]) { tgt[i * 3] = stand[i * 3]; tgt[i * 3 + 1] = stand[i * 3 + 1]; tgt[i * 3 + 2] = stand[i * 3 + 2]; }
+}
+
+
+function configure(R, name) {
+  const rv = R.reveal, steps = [];
+  if (rv.hasDays && rv.lapsed > 0) steps.push({ n: rv.lapsed, line: "Some haven't been to a game in over six months.", tag: "Lapsed, 180+ days" });
+  if (rv.hasTickets && rv.nonBuyers > 0) steps.push({ n: rv.nonBuyers, line: "Some have never bought a ticket.", tag: "Never bought a ticket" });
+  const core = rv.total - steps.reduce((a, s) => a + s.n, 0);
+  CFG = { total: rv.total, per: Math.max(1, Math.ceil(rv.total / 4000)), steps,
+    finalLead: steps.length ? "This is your active core." : "Every fan, scored by FanIntel.",
+    finalTag: steps.length ? (rv.hasDays && rv.hasTickets ? "Seen in the last six months, and buying" : rv.hasDays ? "Seen in the last six months" : "Ticket buyers") : `FanIntel Score ${R.score.value}/100` };
+  ready = core;
+  N = Math.round(CFG.total / CFG.per); sphIdx = new Int32Array(N);
+  $("L_fields").textContent = R.D.headers.length;
+  $("L_matched").textContent = Object.keys(R.cm).length + "/10";
+  $("L_file").textContent = name || "CRM overview";
+  const P = R.players[0], sig = R.signals.find(s => s.priority === "HIGH") || R.signals[0];
+  $("L_f1").textContent = `FanIntel Score: ${R.score.value}/100. ${R.score.label}.`;
+  $("L_f2").textContent = sig ? sig.title + "." : `Engagement score ${R.kpis.sentiment_score}/100.`;
+  $("L_f3").textContent = P ? `${P.name} has the highest marketing value, with ${P.fan_count.toLocaleString("en-GB")} fans naming her as favourite.` : `Ticket demand: ${Math.round(R.kpis.demand_index * 100)}% of fans have bought.`;
+}
+let onDone = null;
+function start(R, name, done) {
+  onDone = done;
+  document.body.classList.add("intro");
+  const el = document.getElementById("landing"); el.hidden = false; el.classList.remove("leaving");
+  configure(R, name);
+  if (glOK) initGL();
+  readColors();
+  if (!booted) {
+    addEventListener("resize", () => { if (alive) resize(); });
+    skipBtn.addEventListener("click", finish);
+    $("L_replay").addEventListener("click", run);
+    $("L_results").addEventListener("click", finish);
+    booted = true;
+  }
+  if (!isFinite(ptr.sx) || !isFinite(ptr.sy)) { ptr.sx = ptr.sy = ptr.x = ptr.y = 0; }
+  alive = true; resize(); requestAnimationFrame(frame); run();
+}
+function finish() { stop(); if (onDone) { const f = onDone; onDone = null; f(); } }
+function stop() {
+  alive = false; timers.forEach(clearTimeout); timers = []; running = false;
+  const el = document.getElementById("landing"); el.classList.add("leaving");
+  document.body.classList.remove("intro");
+  setTimeout(() => { if (!alive) el.hidden = true; }, 520);
+}
+return { start, stop, get alive() { return alive; } };
+})();
+
+if (location.hash === "#demo") App.demo();
+
+if (location.hash === "#demo") App.demo();
+</script>
+</body>
+</html>
